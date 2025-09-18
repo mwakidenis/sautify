@@ -4,7 +4,14 @@ Stream smarter. Listen freer.
 
 Sautify "`Sauti`: A swahili word meaning  sound/voice" is a fast, lightweight music app designed to get you from search to sound with zero friction. Clean & minimal design, instant play, and a beautiful player that adapts to your music—so you spend less time tapping and more time listening.
 
-![Screenshot_1](screenshots/1.jpg) ![Screenshot_2](screenshots/2.jpg) ![Screenshot_3](screenshots/3.jpg) ![Screenshot_4](screenshots/4.jpg) ![Screenshot_5](screenshots/5.jpg) ![Screenshot_6](screenshots/6.jpg)
+<p align="center">
+  <img src="screenshots/1.jpg" width="150" />
+  <img src="screenshots/2.jpg" width="150" />
+  <img src="screenshots/3.jpg" width="150" />
+  <img src="screenshots/4.jpg" width="150" />
+  <img src="screenshots/5.jpg" width="150" />
+  <img src="screenshots/6.jpg" width="150" />
+</p>
 
 We source  music from YouTube music, ensuring a vast library of tracks at your fingertips and  webscraping  music at realtime from various sources.
 
