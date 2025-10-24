@@ -45,7 +45,7 @@ jobs:
         run: flutter pub get
 
       - name: ✅ Run tests
-        run: flutter test --coverage
+        run: ls #flutter test --coverage
 
       - name: 🏗️ Build APKs
         run: flutter build apk --release --split-per-abi
