@@ -68,4 +68,4 @@ jobs:
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           artifacts: artifacts/*.apk
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.TOKEN }}
