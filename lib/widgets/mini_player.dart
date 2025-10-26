@@ -109,7 +109,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                         margin: const EdgeInsets.symmetric(horizontal: 12),
                         child: LinearProgressIndicatorM3E(
                           inset: 0,
-                          shape: ProgressM3EShape.wavy,
+                          shape: ProgressM3EShape.flat,
                           size: LinearProgressM3ESize.s,
                           value: progress,
                           trackColor: iconcolor,

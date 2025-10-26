@@ -620,7 +620,7 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
               trailing: IntrinsicWidth(
                 child: ValueListenableBuilder<String?>(
                   valueListenable: _startingTrackId,
-                  builder: (context, startingId, __) {
+                  builder: (context, startingId, _) {
                     final isStartingThis =
                         startingId == track.videoId && _busy.value;
                     if (isStartingThis) {

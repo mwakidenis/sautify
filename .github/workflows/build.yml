@@ -69,3 +69,8 @@ jobs:
           name: Release ${{ github.ref_name }}
           artifacts: artifacts/*.apk
           token: ${{ secrets.TOKEN }}
+      - name: 📤 Upload artifacts to Actions tab
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-apks
+          path: artifacts/*.apk

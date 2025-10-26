@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-Color bgcolor = Color.fromARGB(255, 16, 16, 17);
+Color bgcolor = Color.fromARGB(255, 12, 11, 11); //16, 16, 17);
 Color txtcolor = Color.fromARGB(255, 251, 250, 250);
 Color appbarcolor = Color.fromARGB(255, 31, 184, 85);
 Color cardcolor = Color.fromARGB(255, 39, 39, 40);

@@ -19,7 +19,6 @@ import 'package:sautifyv2/constants/ui_colors.dart';
 // flutter_localizations are included via AppLocalizations.localizationsDelegates
 import 'package:sautifyv2/l10n/app_localizations.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
-import 'package:sautifyv2/services/homeservice.dart';
 import 'package:sautifyv2/widgets/mini_player.dart';
 import 'package:toastification/toastification.dart';
 
@@ -74,6 +73,7 @@ void main() async {
     androidNotificationOngoing: true,
     androidShowNotificationBadge: true,
     preloadArtwork: true,
+    
     androidNotificationIcon: 'mipmap/ic_launcher',
   );
 
@@ -164,9 +164,6 @@ class _MainAppState extends State<MainApp> {
   @override
   void initState() {
     super.initState();
-    HomeScreenService homeScreenService = HomeScreenService();
-    homeScreenService.initialize();
-    homeScreenService.getHomeSections();
     _checkConnectivityOnLaunch();
     _watchConnectivity();
   }

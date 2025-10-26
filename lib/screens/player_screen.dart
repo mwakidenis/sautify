@@ -17,7 +17,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 // Import for ScrollDirection used in NotificationListener
 import 'package:flutter/rendering.dart' show ScrollDirection;
-import 'package:flutter_audio_output/flutter_audio_output.dart';
+//import 'package:flutter_audio_output/flutter_audio_output.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
@@ -67,7 +67,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late AudioPlayerService _audioService;
   bool isLiked = false;
   StreamSubscription<StreamingData?>? _trackSub;
-  AudioInput? _currentOutput;
+  //AudioInput? _currentOutput;
   //  List<AudioInput> _availableDevices = [];
 
   // Dynamic background colors based on current artwork
@@ -124,8 +124,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final fav = await LibraryStore.isFavorite(vid);
       if (mounted) setState(() => isLiked = fav);
     });
-    _initAudioOutput();
-  }
+    // _initAudioOutput();
+  } /*
 
   Future<void> _initAudioOutput() async {
     // Set up listener for audio device changes
@@ -151,6 +151,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       //print('Error refreshing audio devices: $e');
     }
   }
+*/
 
   void _loadPlaylist() async {
     try {
@@ -199,14 +200,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         sourceName: widget.sourceName,
       );
     } catch (e) {
-      print('Error loading single track: $e');
+      debugPrint('Error loading single track: $e');
     }
   }
 
   @override
   void dispose() {
     _trackSub?.cancel();
-    FlutterAudioOutput.removeListener();
+    // FlutterAudioOutput.removeListener();
     _lyricsScrollController.dispose();
     super.dispose();
   }
@@ -293,7 +294,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 // Main content
                 SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
                     child: Column(
                       children: [
                         // Top bar
@@ -565,8 +566,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Container(
         width: 320,
         height: 320,
+        clipBehavior: Clip.antiAliasWithSaveLayer,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withAlpha(100),
@@ -576,6 +578,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ],
         ),
         child: ClipRRect(
+          clipBehavior: Clip.antiAliasWithSaveLayer,
           borderRadius: BorderRadius.circular(12),
           child: imageUrl != null
               ? (isLocalImage
@@ -584,7 +587,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         fit: BoxFit.cover,
                         width: 320,
                         height: 320,
-                        errorBuilder: (context, _, __) =>
+                        errorBuilder: (context, _, _) =>
                             _buildDefaultAlbumArt(),
                       )
                     : CachedNetworkImage(
@@ -716,30 +719,70 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _buildProgressBar(Duration? duration, Duration position) {
     final d = duration ?? const Duration(minutes: 3, seconds: 30);
-    final value = d.inMilliseconds > 0
-        ? position.inMilliseconds / d.inMilliseconds
+    final posRatio = d.inMilliseconds > 0
+        ? (position.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
     return Column(
       children: [
-        SliderTheme(
-          data: SliderTheme.of(context).copyWith(
-            activeTrackColor: txtcolor,
-            inactiveTrackColor: txtcolor.withAlpha(50),
-            thumbColor: txtcolor,
-            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            trackHeight: 3,
-            overlayShape: const RoundSliderOverlayShape(overlayRadius: 15),
-          ),
-          child: Slider(
-            value: value.clamp(0.0, 1.0),
-            onChanged: (newValue) {
-              final newPosition = Duration(
-                milliseconds: (d.inMilliseconds * newValue).round(),
-              );
-              _audioService.seek(newPosition);
-            },
-          ),
+        // Buffered progress underlay + interactive position slider overlay
+        StreamBuilder<Duration>(
+          stream: _audioService.player.bufferedPositionStream,
+          builder: (context, snap) {
+            final buffered = snap.data ?? Duration.zero;
+            final bufRatio = d.inMilliseconds > 0
+                ? (buffered.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0)
+                : 0.0;
+
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                // Buffered progress (non-interactive)
+                IgnorePointer(
+                  ignoring: true,
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      // Use disabled colors because onChanged is null
+                      disabledActiveTrackColor: txtcolor.withAlpha(70),
+                      disabledInactiveTrackColor: txtcolor.withAlpha(30),
+                      disabledThumbColor: Colors.transparent,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 0,
+                        elevation: 0,
+                      ),
+                      trackHeight: 2,
+                    ),
+                    child: Slider(value: bufRatio, onChanged: null),
+                  ),
+                ),
+                // Actual position slider (interactive)
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: appbarcolor,
+                    inactiveTrackColor: appbarcolor.withAlpha(50),
+                    thumbColor: txtcolor,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 0,
+                      elevation: 0,
+                    ),
+                    trackHeight: 2.5,
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 15,
+                    ),
+                  ),
+                  child: Slider(
+                    value: posRatio,
+                    onChanged: (newValue) {
+                      final newPosition = Duration(
+                        milliseconds: (d.inMilliseconds * newValue).round(),
+                      );
+                      _audioService.seek(newPosition);
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 8),
         Row(

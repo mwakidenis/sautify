@@ -153,17 +153,47 @@ class _HomeScreenState extends State<HomeScreen> {
         body: Consumer<HomeNotifier>(
           builder: (context, homeNotifier, child) {
             if (homeNotifier.error != null) {
+              final isOfflineErr = homeNotifier.error!.toLowerCase().contains(
+                'offline',
+              );
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red, size: 64),
-                    SizedBox(height: 16),
-                    Text(
-                      'Error: ${homeNotifier.error}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.red),
+                    Icon(
+                      isOfflineErr
+                          ? Icons.wifi_off_rounded
+                          : Icons.error_outline,
+                      color: isOfflineErr ? Colors.orange : Colors.red,
+                      size: 64,
                     ),
+                    SizedBox(height: 16),
+                    if (isOfflineErr)
+                      Column(
+                        children: const [
+                          Text(
+                            "You're offline",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Check your connection and try again.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        'Error: ${homeNotifier.error}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red),
+                      ),
                     SizedBox(height: 16),
                     ElevatedButton(
                       onPressed: () => homeNotifier.fetchHomeSections(),
