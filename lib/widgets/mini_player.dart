@@ -34,7 +34,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
       valueListenable: audioService.isPreparing,
       builder: (context, preparing, _) {
         return StreamBuilder<TrackInfo>(
-          stream: audioService.trackInfoStream,
+          stream: audioService.trackInfo$,
           builder: (context, trackInfoSnapshot) {
             final trackInfo = trackInfoSnapshot.data;
             final hasTrack = trackInfo?.track != null;

@@ -226,7 +226,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Scaffold(
       backgroundColor: bgcolor,
       body: StreamBuilder<TrackInfo>(
-        stream: _audioService.trackInfoStream,
+        // Use the throttled Rx-composed TrackInfo stream for consistent UI updates
+        stream: _audioService.trackInfo$,
         builder: (context, infoSnap) {
           final info = infoSnap.data;
 
@@ -718,87 +719,112 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildProgressBar(Duration? duration, Duration position) {
-    final d = duration ?? const Duration(minutes: 3, seconds: 30);
-    final posRatio = d.inMilliseconds > 0
-        ? (position.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-
-    return Column(
-      children: [
-        // Buffered progress underlay + interactive position slider overlay
-        StreamBuilder<Duration>(
-          stream: _audioService.player.bufferedPositionStream,
-          builder: (context, snap) {
-            final buffered = snap.data ?? Duration.zero;
-            final bufRatio = d.inMilliseconds > 0
-                ? (buffered.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0)
-                : 0.0;
-
-            return Stack(
-              alignment: Alignment.center,
-              children: [
-                // Buffered progress (non-interactive)
-                IgnorePointer(
-                  ignoring: true,
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      // Use disabled colors because onChanged is null
-                      disabledActiveTrackColor: txtcolor.withAlpha(70),
-                      disabledInactiveTrackColor: txtcolor.withAlpha(30),
-                      disabledThumbColor: Colors.transparent,
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 0,
-                        elevation: 0,
+    return StreamBuilder<Duration?>(
+      stream: _audioService.player.durationStream,
+      builder: (context, durSnap) {
+        final total =
+            durSnap.data ?? duration ?? const Duration(minutes: 3, seconds: 30);
+        return Column(
+          children: [
+            StreamBuilder<Duration>(
+              stream: _audioService.player.bufferedPositionStream,
+              builder: (context, bufSnap) {
+                final buffered = bufSnap.data ?? Duration.zero;
+                final bufRatio = total.inMilliseconds > 0
+                    ? (buffered.inMilliseconds / total.inMilliseconds).clamp(
+                        0.0,
+                        1.0,
+                      )
+                    : 0.0;
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    IgnorePointer(
+                      ignoring: true,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          disabledActiveTrackColor: txtcolor.withAlpha(70),
+                          disabledInactiveTrackColor: txtcolor.withAlpha(30),
+                          disabledThumbColor: Colors.transparent,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 0,
+                            elevation: 0,
+                          ),
+                          trackHeight: 2,
+                        ),
+                        child: Slider(value: bufRatio, onChanged: null),
                       ),
-                      trackHeight: 2,
                     ),
-                    child: Slider(value: bufRatio, onChanged: null),
-                  ),
+                    StreamBuilder<Duration>(
+                      stream: _audioService.player.positionStream,
+                      builder: (context, posSnap) {
+                        final pos = posSnap.data ?? position;
+                        final posRatio = total.inMilliseconds > 0
+                            ? (pos.inMilliseconds / total.inMilliseconds).clamp(
+                                0.0,
+                                1.0,
+                              )
+                            : 0.0;
+                        return SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: appbarcolor,
+                            inactiveTrackColor: appbarcolor.withAlpha(50),
+                            thumbColor: txtcolor,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 0,
+                              elevation: 0,
+                            ),
+                            trackHeight: 2.5,
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 15,
+                            ),
+                          ),
+                          child: Slider(
+                            value: posRatio,
+                            onChanged: (newValue) {
+                              final newPosition = Duration(
+                                milliseconds: (total.inMilliseconds * newValue)
+                                    .round(),
+                              );
+                              _audioService.seek(newPosition);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                StreamBuilder<Duration>(
+                  stream: _audioService.player.positionStream,
+                  builder: (context, posSnap) {
+                    final pos = posSnap.data ?? position;
+                    return Text(
+                      _formatDuration(pos),
+                      style: TextStyle(
+                        color: txtcolor.withAlpha(180),
+                        fontSize: 12,
+                      ),
+                    );
+                  },
                 ),
-                // Actual position slider (interactive)
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: appbarcolor,
-                    inactiveTrackColor: appbarcolor.withAlpha(50),
-                    thumbColor: txtcolor,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 0,
-                      elevation: 0,
-                    ),
-                    trackHeight: 2.5,
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 15,
-                    ),
-                  ),
-                  child: Slider(
-                    value: posRatio,
-                    onChanged: (newValue) {
-                      final newPosition = Duration(
-                        milliseconds: (d.inMilliseconds * newValue).round(),
-                      );
-                      _audioService.seek(newPosition);
-                    },
+                Text(
+                  _formatDuration(total),
+                  style: TextStyle(
+                    color: txtcolor.withAlpha(180),
+                    fontSize: 12,
                   ),
                 ),
               ],
-            );
-          },
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              _formatDuration(position),
-              style: TextStyle(color: txtcolor.withAlpha(180), fontSize: 12),
-            ),
-            Text(
-              _formatDuration(d),
-              style: TextStyle(color: txtcolor.withAlpha(180), fontSize: 12),
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 

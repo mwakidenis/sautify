@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:dart_ytmusic_api/yt_music.dart';
 import 'package:flutter/material.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:sautifyv2/models/album_search_result.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 
@@ -24,16 +25,14 @@ class SearchProvider extends ChangeNotifier {
   final List<String> _suggestions = [];
   final List<AlbumSearchResult> _albumResults = [];
 
-  // Debounce timer for suggestions/search input
-  Timer? _debounce;
+  // RxDart streams for input and lifecycle
+  final _querySubject = BehaviorSubject<String>.seeded('');
+  final CompositeSubscription _subscriptions = CompositeSubscription();
   final Duration _debounceDuration = const Duration(milliseconds: 350);
-
-  // Cancellation tokens for searches/suggestions to ignore stale responses
-  int _searchGeneration = 0;
-  int _suggestionGeneration = 0;
 
   SearchProvider() {
     _initialize();
+    _setupStreams();
   }
 
   // Getters
@@ -58,11 +57,8 @@ class SearchProvider extends ChangeNotifier {
 
   void updateQuery(String value) {
     _query = value;
-    // Schedule debounced suggestions fetch
-    _debounce?.cancel();
-    _debounce = Timer(_debounceDuration, () {
-      fetchSuggestions(_query);
-    });
+    // Push into the query stream; suggestions will debounce/cancel via Rx
+    _querySubject.add(value);
     notifyListeners();
   }
 
@@ -73,12 +69,8 @@ class SearchProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-
-    final int token = ++_suggestionGeneration;
     try {
       final sugg = await _ytmusic.getSearchSuggestions(searchText);
-      // Ignore stale responses
-      if (token != _suggestionGeneration) return;
 
       _suggestions
         ..clear()
@@ -96,19 +88,10 @@ class SearchProvider extends ChangeNotifier {
     _isLoading = true;
     _error = null;
     notifyListeners();
-
-    final int token = ++_searchGeneration;
     try {
       // Kick off both requests
-      final songsFuture = _ytmusic.searchSongs(searchText);
-      final albumsFuture = _ytmusic.searchAlbums(searchText);
-
-      final songs = await songsFuture;
-      // Ignore stale responses between awaits
-      if (token != _searchGeneration) return;
-
-      final albums = await albumsFuture;
-      if (token != _searchGeneration) return;
+      final songs = await _ytmusic.searchSongs(searchText);
+      final albums = await _ytmusic.searchAlbums(searchText);
 
       _results
         ..clear()
@@ -146,13 +129,10 @@ class SearchProvider extends ChangeNotifier {
           }),
         );
     } catch (e) {
-      if (token != _searchGeneration) return;
       _error = 'Search failed: $e';
     } finally {
-      if (token == _searchGeneration) {
-        _isLoading = false;
-        notifyListeners();
-      }
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
@@ -192,7 +172,37 @@ class SearchProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _subscriptions.dispose();
+    _querySubject.close();
     super.dispose();
+  }
+
+  void _setupStreams() {
+    // Debounced, cancellable suggestions stream.
+    // On every query change, wait for the debounce window and fetch suggestions.
+    // switchMap ensures in-flight requests are ignored/cancelled when a new query arrives.
+    final s = _querySubject
+        .debounceTime(_debounceDuration)
+        .map((q) => q.trim())
+        .distinct()
+        .where((q) => q.isNotEmpty)
+        .switchMap<List<String>>((q) {
+          Future<List<String>> fut;
+          if (_initialized) {
+            fut = _ytmusic
+                .getSearchSuggestions(q)
+                .then((s) => List<String>.from(s.map((e) => e.toString())));
+          } else {
+            fut = Future.value(<String>[]);
+          }
+          return Stream.fromFuture(fut).onErrorReturn(<String>[]);
+        })
+        .listen((sugg) {
+          _suggestions
+            ..clear()
+            ..addAll(sugg);
+          notifyListeners();
+        });
+    _subscriptions.add(s);
   }
 }

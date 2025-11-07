@@ -12,6 +12,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:dio/dio.dart' show Options;
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:sautifyv2/db/library_store.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/loading_progress_model.dart';
@@ -53,9 +54,12 @@ class AudioPlayerService extends ChangeNotifier {
   int _lastProgressResolvedCount = 0;
   DateTime? _loadStartAt;
 
-  // Debounced preparing state exposure
-  bool _internalPreparing = false;
-  Timer? _preparingDebounceTimer;
+  // Preparing state exposure via Rx debounce
+  bool _internalPreparing = false; // raw intent
+  final BehaviorSubject<bool> _preparingSubject = BehaviorSubject<bool>.seeded(
+    false,
+  );
+  StreamSubscription<bool>? _preparingSub;
 
   // Progress tracking for playlist loading
   final ValueNotifier<LoadingProgress?> loadingProgress =
@@ -269,6 +273,62 @@ class AudioPlayerService extends ChangeNotifier {
   /// Optimized, event-driven TrackInfo stream
   Stream<TrackInfo> get trackInfoStream => _trackInfoController.stream;
 
+  /// RxDart-composed TrackInfo stream combining underlying player streams.
+  /// Backed by a BehaviorSubject for broadcast + replay to support multiple listeners safely.
+  final BehaviorSubject<TrackInfo> _trackInfoSubject =
+      BehaviorSubject<TrackInfo>();
+  Stream<TrackInfo> get trackInfo$ => _trackInfoSubject.stream;
+  StreamSubscription<TrackInfo>? _trackInfoRxSub;
+
+  void _startTrackInfoRx() {
+    _trackInfoRxSub?.cancel();
+    final rx$ =
+        Rx.combineLatest6<
+              Duration,
+              Duration?,
+              PlayerState,
+              int?,
+              bool,
+              LoopMode,
+              TrackInfo
+            >(
+              _player.positionStream,
+              _player.durationStream,
+              _player.playerStateStream,
+              _player.currentIndexStream,
+              _player.shuffleModeEnabledStream,
+              _player.loopModeStream,
+              (pos, dur, ps, idx, shuf, loop) {
+                final track = currentTrack;
+                final total = _playlist.length;
+                final progress = (dur != null && dur.inMilliseconds > 0)
+                    ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+                    : 0.0;
+                final lm = _loopModeString[loop] ?? 'off';
+                return TrackInfo(
+                  track: track,
+                  currentIndex: _currentIndex,
+                  totalTracks: total,
+                  isPlaying: ps.playing,
+                  isShuffleEnabled: shuf,
+                  loopMode: lm,
+                  position: pos,
+                  duration: dur,
+                  progress: progress,
+                  sourceName: _sourceName,
+                  sourceType: _sourceType,
+                );
+              },
+            )
+            .distinct((a, b) => a == b)
+            .sampleTime(const Duration(milliseconds: 250));
+
+    _trackInfoRxSub = rx$.listen(
+      (t) => _trackInfoSubject.add(t),
+      onError: _trackInfoSubject.addError,
+    );
+  }
+
   // Allow screens to set source context
   void setSourceContext({String? name, String type = 'QUEUE'}) {
     _sourceName = name;
@@ -435,6 +495,16 @@ class AudioPlayerService extends ChangeNotifier {
     // Emit initial current track
     _currentTrackController.add(currentTrack);
     _emitTrackInfo(force: true);
+
+    // Start Rx-backed track info and seed an initial value
+    _startTrackInfoRx();
+    _trackInfoSubject.add(_computeTrackInfo());
+
+    // Debounced preparing state
+    _preparingSub = _preparingSubject
+        .debounceTime(const Duration(milliseconds: 120))
+        .distinct()
+        .listen((v) => isPreparing.value = v);
 
     // Listen to player events
     _player.currentIndexStream.listen((audioIndex) {
@@ -1568,6 +1638,8 @@ class AudioPlayerService extends ChangeNotifier {
   /// Dispose resources
   @override
   void dispose() {
+    _trackInfoRxSub?.cancel();
+    _trackInfoSubject.close();
     // Cleanly tear down isolate *only* when service is disposed (app shutdown)
     try {
       _playlistWorkerReceivePort?.close();
@@ -1580,6 +1652,8 @@ class AudioPlayerService extends ChangeNotifier {
     _playlistWorker = null;
     _currentTrackController.close();
     _trackInfoController.close();
+    _preparingSub?.cancel();
+    _preparingSubject.close();
     _player.dispose();
     _streamingService.dispose();
     isPreparing.dispose();
@@ -1761,16 +1835,7 @@ class AudioPlayerService extends ChangeNotifier {
   void _setPreparing(bool value) {
     if (value == _internalPreparing) return;
     _internalPreparing = value;
-    _preparingDebounceTimer?.cancel();
-    if (value) {
-      _preparingDebounceTimer = Timer(const Duration(milliseconds: 120), () {
-        if (_internalPreparing) {
-          isPreparing.value = true;
-        }
-      });
-    } else {
-      isPreparing.value = false;
-    }
+    _preparingSubject.add(value);
   }
 
   void _emitPerfLog(String phase, {Map<String, Object?> extra = const {}}) {

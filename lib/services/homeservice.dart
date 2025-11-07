@@ -4,10 +4,10 @@ Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
 https://creativecommons.org/licenses/by/4.0/
 */
 
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dart_ytmusic_api/yt_music.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sautifyv2/models/home/home.dart';
+import 'package:sautifyv2/services/connectivity_service.dart';
 import 'package:sautifyv2/services/home_service.dart';
 
 class HomeScreenService implements HomeService {
@@ -21,9 +21,7 @@ class HomeScreenService implements HomeService {
     _isLoading = true;
     try {
       // Fast-fail when offline to avoid indefinite hangs and skeletons
-      final conns = await Connectivity().checkConnectivity();
-      final offline =
-          conns.isEmpty || conns.every((c) => c == ConnectivityResult.none);
+      final offline = !ConnectivityService().isOnline$.value;
       if (offline) {
         throw Exception('Offline');
       }
@@ -50,9 +48,7 @@ class HomeScreenService implements HomeService {
   Future<void> initialize() async {
     try {
       // If offline, skip heavy init and return quickly
-      final conns = await Connectivity().checkConnectivity();
-      final offline =
-          conns.isEmpty || conns.every((c) => c == ConnectivityResult.none);
+      final offline = !ConnectivityService().isOnline$.value;
       if (offline) return;
 
       // Add a timeout to avoid blocking on launch when network is slow/down

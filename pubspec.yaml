@@ -52,6 +52,7 @@ dependencies:
   loading_indicator_m3e: any
   m3e_design: any
   marquee: any
+  rxdart: ^0.27.7
 
 dependency_overrides:
   intl: 0.20.2
