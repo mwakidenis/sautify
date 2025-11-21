@@ -52,6 +52,46 @@ class StreamingCache {
     if (b == null) return;
     try {
       await b.put(videoId, jsonEncode(data.toJson()));
+      // Prune if too large
+      if (b.length > 200) {
+        // Run in background to avoid blocking
+        Future.microtask(() => _pruneCache(b));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _pruneCache(Box<String> b) async {
+    try {
+      final keys = b.keys.toList(growable: false);
+      final entries = <String, DateTime>{};
+
+      // 1. Collect timestamps
+      for (final key in keys) {
+        final raw = b.get(key);
+        if (raw == null) continue;
+        try {
+          final map = jsonDecode(raw) as Map<String, dynamic>;
+          final data = StreamingData.fromJson(map);
+          if (data.isExpired) {
+            await b.delete(key);
+            continue;
+          }
+          entries[key.toString()] = data.cachedAt;
+        } catch (_) {
+          await b.delete(key);
+        }
+      }
+
+      // 2. If still too big, remove oldest
+      if (b.length > 150) {
+        final sorted = entries.entries.toList()
+          ..sort((a, b) => a.value.compareTo(b.value));
+
+        final toRemove = sorted.take(sorted.length - 150);
+        for (final e in toRemove) {
+          await b.delete(e.key);
+        }
+      }
     } catch (_) {}
   }
 

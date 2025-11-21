@@ -21,6 +21,7 @@ import 'services/streaming_cache.dart';
 class MusicStreamingService {
   static const int _maxConcurrentRequests = 5;
   static const int _retryAttempts = 2;
+  static const int _maxCacheSize = 50;
   static const Duration _requestTimeout = Duration(seconds: 40);
   static const Duration _nearExpiryRefreshThreshold = Duration(
     hours: 5,
@@ -29,7 +30,7 @@ class MusicStreamingService {
 
   final Dio _dio;
   final Semaphore _semaphore;
-  final Map<String, StreamingData> _streamCache = {};
+  final LinkedHashMap<String, StreamingData> _streamCache = LinkedHashMap();
   // Deduplicate concurrent fetches for the same videoId
   final Map<String, Future<StreamingData?>> _inflight = {};
   final StreamingCache _persistent = StreamingCache();
@@ -88,7 +89,7 @@ class MusicStreamingService {
         final r = await _processVideoId(id, quality);
         if (r != null) {
           successful.add(r);
-          _streamCache[id] = r;
+          _addToCache(id, r);
         } else {
           failed.add(id);
         }
@@ -138,7 +139,7 @@ class MusicStreamingService {
           quality,
         );
         if (result != null) {
-          _streamCache[videoId] = result;
+          _addToCache(videoId, result);
           // Persist to disk for next app start
           // ignore: discarded_futures
           _persistent.set(videoId, result);
@@ -194,7 +195,7 @@ class MusicStreamingService {
       try {
         final r = await _fetchStreamingDataHedgedWithRetry(videoId, quality);
         if (r != null) {
-          _streamCache[videoId] = r;
+          _addToCache(videoId, r);
           // ignore: discarded_futures
           _persistent.set(videoId, r);
         }
@@ -217,7 +218,7 @@ class MusicStreamingService {
     try {
       final fresh = await _fetchStreamingDataHedgedWithRetry(videoId, quality);
       if (fresh != null) {
-        _streamCache[videoId] = fresh;
+        _addToCache(videoId, fresh);
         // ignore: discarded_futures
         _persistent.set(videoId, fresh);
       } else {
@@ -241,38 +242,51 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
-    final Stopwatch sw = Stopwatch()..start();
-    StreamingData? winner;
-    Object? primaryError;
-
-    // Primary: Okatsu API
-    try {
-      winner = await _fetchFromOkatsu(videoId, quality);
-    } catch (e) {
-      primaryError = e;
-      if (kDebugMode) {
-        debugPrint('[resolve] Okatsu failed for $videoId: $e');
-      }
-    }
-
-    // Fallback: YouTubeExplode
-    if (winner == null) {
-      try {
-        winner = await _fetchFromYouTubeExplode(videoId, quality);
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[resolve] YoutubeExplode failed for $videoId: $e');
-        }
-      }
-    }
-
+    final sw = Stopwatch()..start();
+    // Launch primary immediately
+    final okatsuFuture = _fetchFromOkatsu(videoId, quality);
+    // Launch fallback slightly delayed to give primary a head-start (tail latency reduction)
+    final explodeFuture = Future.delayed(
+      const Duration(milliseconds: 50),
+      () => _fetchFromYouTubeExplode(videoId, quality),
+    );
+    final winner = await _firstSuccess([okatsuFuture, explodeFuture]);
     sw.stop();
     if (kDebugMode) {
       debugPrint(
-        '[resolve] vid=$videoId total=${sw.elapsedMilliseconds}ms primaryError=${primaryError != null} winner=${winner == null ? 'none' : winner.quality.toString()}',
+        '[resolve] vid=$videoId hedged=${sw.elapsedMilliseconds}ms winner=${winner?.quality}',
       );
     }
     return winner;
+  }
+
+  Future<StreamingData?> _firstSuccess(
+    List<Future<StreamingData?>> futures,
+  ) async {
+    final completer = Completer<StreamingData?>();
+    int remaining = futures.length;
+    void tryComplete() {
+      if (remaining == 0 && !completer.isCompleted) {
+        completer.complete(null);
+      }
+    }
+
+    for (final f in futures) {
+      f
+          .then((value) {
+            if (value != null && !completer.isCompleted) {
+              completer.complete(value);
+            } else {
+              remaining--;
+              tryComplete();
+            }
+          })
+          .catchError((_) {
+            remaining--;
+            tryComplete();
+          });
+    }
+    return completer.future;
   }
 
   void _refreshInBackground(String videoId, StreamingQuality quality) {
@@ -283,13 +297,11 @@ class MusicStreamingService {
           quality,
         );
         if (refreshed != null) {
-          _streamCache[videoId] = refreshed;
+          _addToCache(videoId, refreshed);
           // ignore: discarded_futures
           _persistent.set(videoId, refreshed);
         }
-      } catch (_) {
-        // ignore errors during background refresh
-      }
+      } catch (_) {}
     }();
   }
 
@@ -550,6 +562,15 @@ class MusicStreamingService {
     // Cancel connectivity subscription
     _connSub?.cancel();
     _connSub = null;
+  }
+
+  void _addToCache(String videoId, StreamingData data) {
+    if (_streamCache.containsKey(videoId)) {
+      _streamCache.remove(videoId);
+    } else if (_streamCache.length >= _maxCacheSize) {
+      _streamCache.remove(_streamCache.keys.first);
+    }
+    _streamCache[videoId] = data;
   }
 }
 

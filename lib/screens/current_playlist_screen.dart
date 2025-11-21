@@ -11,10 +11,17 @@ import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
 
-class CurrentPlaylistScreen extends StatelessWidget {
+class CurrentPlaylistScreen extends StatefulWidget {
   final AudioPlayerService audioService;
 
   const CurrentPlaylistScreen({super.key, required this.audioService});
+
+  @override
+  State<CurrentPlaylistScreen> createState() => _CurrentPlaylistScreenState();
+}
+
+class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
+  int? _loadingIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -38,9 +45,9 @@ class CurrentPlaylistScreen extends StatelessWidget {
         actions: [
           // Rebuild count only when audioService notifies (playlist changes)
           AnimatedBuilder(
-            animation: audioService,
+            animation: widget.audioService,
             builder: (context, _) {
-              final count = audioService.playlist.length;
+              final count = widget.audioService.playlist.length;
               return Padding(
                 padding: const EdgeInsets.only(right: 16),
                 child: Center(
@@ -58,9 +65,9 @@ class CurrentPlaylistScreen extends StatelessWidget {
         ],
       ),
       body: AnimatedBuilder(
-        animation: audioService,
+        animation: widget.audioService,
         builder: (context, _) {
-          final playlist = audioService.playlist;
+          final playlist = widget.audioService.playlist;
 
           if (playlist.isEmpty) {
             return Center(
@@ -86,7 +93,7 @@ class CurrentPlaylistScreen extends StatelessWidget {
           }
 
           // Use the service's playlist index (shuffle-aware mapping)
-          final currentIndex = audioService.currentIndex;
+          final currentIndex = widget.audioService.currentIndex;
 
           return SafeArea(
             bottom: true,
@@ -112,6 +119,7 @@ class CurrentPlaylistScreen extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final track = playlist[index];
                     final isCurrentTrack = index == currentIndex;
+                    final isLoading = _loadingIndex == index;
 
                     return Container(
                       color: isCurrentTrack
@@ -119,13 +127,31 @@ class CurrentPlaylistScreen extends StatelessWidget {
                           : Colors.transparent,
                       child: InkWell(
                         onTap: () async {
-                          if (index != currentIndex) {
-                            await audioService.seek(
-                              Duration.zero,
-                              index: index,
-                            );
-                            if (context.mounted) {
-                              Navigator.pop(context);
+                          if (index != currentIndex && _loadingIndex == null) {
+                            setState(() => _loadingIndex = index);
+                            try {
+                              final success = await widget.audioService.seek(
+                                Duration.zero,
+                                index: index,
+                              );
+                              if (context.mounted) {
+                                if (success) {
+                                  Navigator.pop(context);
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Unable to play track. Please try again.',
+                                      ),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              }
+                            } finally {
+                              if (mounted) {
+                                setState(() => _loadingIndex = null);
+                              }
                             }
                           }
                         },
@@ -145,30 +171,48 @@ class CurrentPlaylistScreen extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(10),
                                   color: cardcolor,
                                 ),*/
-                                child: track.thumbnailUrl != null
-                                    ? CachedNetworkImage(
-                                        placeholder: M3Container.square(
-                                          color: bgcolor.withAlpha(155),
-                                          child: LoadingIndicatorM3E(
-                                            color: appbarcolor.withAlpha(155),
-                                          ),
-                                        ),
-                                        imageUrl: track.thumbnailUrl!,
-                                        borderRadius: BorderRadius.circular(10),
-                                        fit: BoxFit.cover,
+                                child: isLoading
+                                    ? SizedBox(
                                         width: 48,
                                         height: 48,
-                                        errorWidget: Icon(
-                                          Icons.music_note,
-                                          color: iconcolor.withAlpha(180),
-                                          size: 24,
+                                        child: Center(
+                                          child: LoadingIndicatorM3E(
+                                            color: appbarcolor,
+                                            constraints: const BoxConstraints(
+                                              maxWidth: 24,
+                                              maxHeight: 24,
+                                            ),
+                                            // polygons: [MaterialShapes.pill],
+                                          ),
                                         ),
                                       )
-                                    : Icon(
-                                        Icons.music_note,
-                                        color: iconcolor.withAlpha(180),
-                                        size: 24,
-                                      ),
+                                    : (track.thumbnailUrl != null
+                                          ? CachedNetworkImage(
+                                              placeholder: M3Container.square(
+                                                color: bgcolor.withAlpha(155),
+                                                child: LoadingIndicatorM3E(
+                                                  color: appbarcolor.withAlpha(
+                                                    155,
+                                                  ),
+                                                ),
+                                              ),
+                                              imageUrl: track.thumbnailUrl!,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              fit: BoxFit.cover,
+                                              width: 48,
+                                              height: 48,
+                                              errorWidget: Icon(
+                                                Icons.music_note,
+                                                color: iconcolor.withAlpha(180),
+                                                size: 24,
+                                              ),
+                                            )
+                                          : Icon(
+                                              Icons.music_note,
+                                              color: iconcolor.withAlpha(180),
+                                              size: 24,
+                                            )),
                               ),
 
                               const SizedBox(width: 12),

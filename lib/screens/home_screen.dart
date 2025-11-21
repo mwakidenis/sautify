@@ -26,6 +26,7 @@ import 'package:sautifyv2/providers/fetch_home_Section.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
 import 'package:sautifyv2/screens/playlist_overlay_screen.dart';
 import 'package:sautifyv2/screens/search_overlay_screen.dart';
+import 'package:sautifyv2/services/homeservice.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
@@ -43,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Box<String>? _downloadsBox;
   // Simple tap throttle timestamp to prevent rapid double taps,surprisingly it works
   DateTime _lastActionAt = DateTime.fromMillisecondsSinceEpoch(0);
+  HomeDataSource? _lastSnackSource;
 
   @override
   void initState() {
@@ -196,6 +198,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     SizedBox(height: 16),
                     ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: appbarcolor,
+                      ),
                       onPressed: () => homeNotifier.fetchHomeSections(),
                       child: Text('Retry'),
                     ),
@@ -203,6 +208,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               );
             }
+
+            // Show an ephemeral SnackBar instead of a persistent banner when
+            // content is served from cache or empty fallback.
+            _maybeShowInfoSnack(context, homeNotifier);
 
             return ExpressiveRefreshIndicator(
               indicatorConstraints: BoxConstraints(
@@ -215,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
               elevation: 3,
               color: appbarcolor.withAlpha(255),
               backgroundColor: cardcolor.withAlpha(155),
-              onRefresh: () => homeNotifier.fetchHomeSections(),
+              onRefresh: () => homeNotifier.refresh(),
               child: Skeletonizer(
                 enabled:
                     homeNotifier.isLoading ||
@@ -258,6 +267,38 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _maybeShowInfoSnack(BuildContext context, HomeNotifier homeNotifier) {
+    // Avoid showing during initial loading with empty list
+    if (homeNotifier.isLoading && homeNotifier.sections.isEmpty) return;
+    final src = homeNotifier.servedFrom;
+    if (src == HomeDataSource.fresh) return;
+    if (_lastSnackSource == src) return; // don't spam
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final isFallback = src == HomeDataSource.emptyFallback;
+      final text = isFallback
+          ? "Couldn't reach YT Music. Showing placeholders."
+          : "Showing cached sections. Pull to refresh for latest.";
+      final snack = SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isFallback
+            ? Colors.orange.withOpacity(0.9)
+            : appbarcolor.withOpacity(0.9),
+        action: SnackBarAction(
+          label: 'Retry',
+          onPressed: () =>
+              homeNotifier.refresh(timeout: const Duration(seconds: 20)),
+        ),
+        duration: const Duration(seconds: 3),
+      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(snack);
+    });
+    _lastSnackSource = src;
   }
 
   Widget _buildSectionWidget(BuildContext context, Section section) {

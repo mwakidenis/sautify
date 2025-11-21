@@ -83,7 +83,9 @@ class ImageCacheService {
 
   Future<Uint8List?> _loadImage(String url) async {
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         return response.bodyBytes;
       }
@@ -112,6 +114,15 @@ class ImageCacheService {
     while (_totalBytes > target && _lru.isNotEmpty) {
       final oldestKey = _lru.keys.first;
       _remove(oldestKey);
+    }
+  }
+
+  /// Remove specific images from cache (e.g. when playlist changes)
+  void removeSpecificImages(Iterable<String> urls) {
+    for (final url in urls) {
+      if (_cache.containsKey(url)) {
+        _remove(url);
+      }
     }
   }
 

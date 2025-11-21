@@ -3,10 +3,10 @@ description: "A new Flutter project."
 
 publish_to: "none"
 
-version: 0.0.3+2
+version: 0.0.4
 
 environment:
-  sdk: ^3.9.2
+  sdk: ^3.10.0
 
 dependencies:
   flutter:
@@ -17,6 +17,10 @@ dependencies:
   cupertino_icons: any
   just_audio_background: any
   just_audio: any
+  just_audio_media_kit: any
+  media_kit_libs_android_audio: any
+  # Add Windows native audio libs so MediaKit backend can work on Windows dev builds
+  media_kit_libs_windows_audio: any
   provider: any
   shared_preferences: any
   http: any
@@ -42,6 +46,8 @@ dependencies:
   toastification: any
   connectivity_plus: any
   path_provider: any
+  package_info_plus: any
+  url_launcher: any
   expressive_refresh: any
   material_new_shapes: any
   flutter_m3shapes: any
@@ -52,7 +58,7 @@ dependencies:
   loading_indicator_m3e: any
   m3e_design: any
   marquee: any
-  rxdart: ^0.27.7
+  rxdart: any
 
 dependency_overrides:
   intl: 0.20.2

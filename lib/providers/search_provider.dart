@@ -6,14 +6,14 @@ https://creativecommons.org/licenses/by/4.0/
 
 import 'dart:async';
 
-import 'package:dart_ytmusic_api/yt_music.dart';
 import 'package:flutter/material.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sautifyv2/models/album_search_result.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
+import 'package:sautifyv2/services/ytmusic_service.dart';
 
 class SearchProvider extends ChangeNotifier {
-  final YTMusic _ytmusic = YTMusic();
+  final YTMusicService _yt = YTMusicService.instance;
 
   bool _initialized = false;
   bool _isLoading = false;
@@ -46,7 +46,7 @@ class SearchProvider extends ChangeNotifier {
 
   Future<void> _initialize() async {
     try {
-      await _ytmusic.initialize();
+      await _yt.initializeIfNeeded(timeout: const Duration(seconds: 15));
       _initialized = true;
       notifyListeners();
     } catch (e) {
@@ -70,7 +70,10 @@ class SearchProvider extends ChangeNotifier {
       return;
     }
     try {
-      final sugg = await _ytmusic.getSearchSuggestions(searchText);
+      final sugg = await _yt.getSearchSuggestions(
+        searchText,
+        timeout: const Duration(seconds: 4),
+      );
 
       _suggestions
         ..clear()
@@ -85,25 +88,78 @@ class SearchProvider extends ChangeNotifier {
     final searchText = (q ?? _query).trim();
     if (searchText.isEmpty || !_initialized) return;
 
+    // Reentrancy guard & request identity token
+    final int token = DateTime.now().microsecondsSinceEpoch;
+    _activeSearchToken = token;
+
     _isLoading = true;
     _error = null;
     notifyListeners();
-    try {
-      // Kick off both requests
-      final songs = await _ytmusic.searchSongs(searchText);
-      final albums = await _ytmusic.searchAlbums(searchText);
 
+    // Fire both queries concurrently (reduces total wait time vs sequential)
+    final songsFut = _yt
+        .searchSongs(searchText, timeout: const Duration(seconds: 5))
+        .then<List<dynamic>>((v) => v)
+        .catchError((e, st) {
+          if (e is TimeoutException) _songsTimedOutCount++;
+          return <
+            dynamic
+          >[]; // treat failure as empty; we decide later if it's fatal
+        });
+    final albumsFut = _yt
+        .searchAlbums(searchText, timeout: const Duration(seconds: 5))
+        .then<List<dynamic>>((v) => v)
+        .catchError((e, st) {
+          if (e is TimeoutException) _albumsTimedOutCount++;
+          return <dynamic>[];
+        });
+
+    bool overallTimedOut = false;
+    List<dynamic> songs = <dynamic>[];
+    List<dynamic> albums = <dynamic>[];
+    try {
+      final combined = await Future.wait<List<dynamic>>([songsFut, albumsFut])
+          .timeout(
+            const Duration(seconds: 6),
+            onTimeout: () {
+              overallTimedOut = true;
+              return <List<dynamic>>[]; // indicates total timeout
+            },
+          );
+      if (combined.isNotEmpty) {
+        songs = combined[0];
+        albums = combined.length > 1 ? combined[1] : <dynamic>[];
+      }
+    } catch (e) {
+      // Non-timeout unexpected errors bubble into _error below
+      if (e is TimeoutException) overallTimedOut = true;
+    }
+
+    // If a newer search started meanwhile, abort applying these results.
+    if (_activeSearchToken != token) {
+      return; // newer search owns state updates
+    }
+
+    // Decide error vs partial results.
+    final songsFailed = songs.isEmpty && _songsTimedOutCount > 0;
+    final albumsFailed = albums.isEmpty && _albumsTimedOutCount > 0;
+    final bothFailed = (songsFailed && albumsFailed) || overallTimedOut;
+
+    if (bothFailed) {
+      _results.clear();
+      _albumResults.clear();
+      _error = 'Search timed out. Please check your connection.';
+    } else {
+      // Map songs
       _results
         ..clear()
         ..addAll(
           songs.map((song) {
             final thumb = _pickBetterThumb(song.thumbnails);
-            // Convert API duration (int? seconds) to Duration?
             final int? seconds = song.duration;
             final Duration? dur = seconds != null
                 ? Duration(seconds: seconds)
                 : null;
-
             return StreamingData(
               videoId: song.videoId,
               title: song.name,
@@ -128,33 +184,60 @@ class SearchProvider extends ChangeNotifier {
             );
           }),
         );
-    } catch (e) {
-      _error = 'Search failed: $e';
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+
+      // If one side failed, surface a soft warning instead of hard error.
+      if (songsFailed || albumsFailed) {
+        _error = 'Partial results – some items timed out.';
+      }
     }
+
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<List<StreamingData>> fetchAlbumTracks(String albumId) async {
     if (!_initialized) return [];
     try {
-      final album = await _ytmusic.getAlbum(albumId);
-      // Map tracks to StreamingData
-      final tracks = album.songs.map((s) {
-        final thumb = _pickBetterThumb(s.thumbnails);
-        final int? seconds = s.duration;
-        final Duration? dur = seconds != null
-            ? Duration(seconds: seconds)
-            : null;
-        return StreamingData(
-          videoId: s.videoId,
-          title: s.name,
-          artist: s.artist.name,
-          thumbnailUrl: thumb,
-          duration: dur,
-        );
-      }).toList();
+      final album = await _yt.getAlbum(
+        albumId,
+        timeout: const Duration(seconds: 6),
+      );
+      // Defensive: album.songs may come in various dynamic shapes; force cast.
+      final dynamic songsDynamic = (album as dynamic).songs;
+      if (songsDynamic == null) return [];
+      final List<dynamic> rawList = songsDynamic is List
+          ? List<dynamic>.from(songsDynamic)
+          : <dynamic>[];
+      final tracks = <StreamingData>[];
+      for (final s in rawList) {
+        try {
+          // If already a StreamingData (cached path), reuse.
+          if (s is StreamingData) {
+            tracks.add(s);
+            continue;
+          }
+          final thumb = _pickBetterThumb((s as dynamic).thumbnails);
+          final int? seconds = (s as dynamic).duration as int?;
+          final Duration? dur = seconds != null
+              ? Duration(seconds: seconds)
+              : null;
+          final videoId = (s as dynamic).videoId?.toString() ?? '';
+          final title = (s as dynamic).name?.toString() ?? 'Unknown';
+          final artistName =
+              (s as dynamic).artist?.name?.toString() ?? 'Unknown';
+          tracks.add(
+            StreamingData(
+              videoId: videoId,
+              title: title,
+              artist: artistName,
+              thumbnailUrl: thumb,
+              duration: dur,
+            ),
+          );
+        } catch (_) {
+          // Skip malformed entry
+        }
+      }
       return tracks;
     } catch (e) {
       _error = 'Failed to load album: $e';
@@ -189,9 +272,10 @@ class SearchProvider extends ChangeNotifier {
         .switchMap<List<String>>((q) {
           Future<List<String>> fut;
           if (_initialized) {
-            fut = _ytmusic
-                .getSearchSuggestions(q)
-                .then((s) => List<String>.from(s.map((e) => e.toString())));
+            fut = _yt.getSearchSuggestions(
+              q,
+              timeout: const Duration(seconds: 4),
+            );
           } else {
             fut = Future.value(<String>[]);
           }
@@ -204,5 +288,19 @@ class SearchProvider extends ChangeNotifier {
           notifyListeners();
         });
     _subscriptions.add(s);
+  }
+
+  // State for concurrency & diagnostics
+  int? _activeSearchToken;
+  int _songsTimedOutCount = 0;
+  int _albumsTimedOutCount = 0;
+
+  /// Retry the last search with extended timeouts (useful after a timeout).
+  Future<void> retrySearch() async {
+    // Reset timeout counters for fresh attempt
+    _songsTimedOutCount = 0;
+    _albumsTimedOutCount = 0;
+    // Re-run search with current query
+    await search(_query);
   }
 }

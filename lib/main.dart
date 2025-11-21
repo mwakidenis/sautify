@@ -5,6 +5,7 @@ https://creativecommons.org/licenses/by/4.0/
 */
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:navigation_bar_m3e/navigation_bar_m3e.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -22,14 +24,17 @@ import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/widgets/mini_player.dart';
 import 'package:toastification/toastification.dart';
 
-import '../screens/home_screen.dart';
-import '../screens/library_screen.dart';
 // Legacy lightweight i18n helper is still used in other screens; not needed here
 // import 'l10n/strings.dart';
 import 'providers/library_provider.dart';
+import 'screens/home_screen.dart';
+import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/image_cache_service.dart';
 import 'services/settings_service.dart';
+import 'utils/app_config.dart';
+import 'utils/http_overrides.dart';
+import 'utils/restart_widget.dart';
 
 Future<void> _requestNotificationPermissionIfNeeded() async {
   final status = await Permission.notification.status;
@@ -44,13 +49,16 @@ Future<void> _requestNotificationPermissionIfNeeded() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = MyHttpOverrides();
 
   // Workaround: Suppress noisy debug-only MouseTracker assertion during warm-up frames/hot reload
   // See: https://github.com/flutter/flutter/issues (various reports around mouse_tracker.dart !_debugDuringDeviceUpdate)
   _installMouseTrackerAssertWorkaround();
 
   // Init Hive early for local storage
-  await Hive.initFlutter();
+  if (!AppConfig.isTest) {
+    await Hive.initFlutter();
+  }
 
   // Configure and register memory pressure handling for images
   final imgCacheSvc = ImageCacheService();
@@ -60,28 +68,49 @@ void main() async {
   // Also cap Flutter's built-in ImageCache to limit decoded frames in memory
   PaintingBinding.instance.imageCache
     ..maximumSize =
-        100 // max number of images
+        100 // max number of images+
     ..maximumSizeBytes = 30 * 1024 * 1024; // ~30MB decoded bytes
 
   // Request runtime permission for notifications on Android 13+
-  await _requestNotificationPermissionIfNeeded();
+  if (!AppConfig.isTest) {
+    await _requestNotificationPermissionIfNeeded();
+  }
 
   // Initialize background audio notifications/controls
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.sautify.playback',
-    androidNotificationChannelName: 'Sautify Playback',
-    androidNotificationOngoing: true,
-    androidShowNotificationBadge: true,
-    preloadArtwork: true,
-    
-    androidNotificationIcon: 'mipmap/ic_launcher',
-  );
+  if (!AppConfig.isTest) {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.sautify.playback',
+      androidNotificationChannelName: 'Sautify Playback',
+      androidNotificationOngoing: true,
+      androidShowNotificationBadge: true,
+      preloadArtwork: true,
+
+      androidNotificationIcon: 'mipmap/ic_launcher',
+    );
+  }
+
+  // Load settings to decide audio backend before creating any AudioPlayer
+  final settings = SettingsService();
+  if (!settings.isReady) {
+    await settings.init();
+  }
+  if (settings.audioBackend == 'mediakit' && !AppConfig.isTest) {
+    // Initialize MediaKit.
+    // Note: On Android, this uses a bundled MPV build which increases APK size
+    // and might behave differently than ExoPlayer.
+    JustAudioMediaKit.ensureInitialized(
+      windows: true,
+      android: true, // Enable on Android if selected
+      linux: true,
+      macOS: true,
+    );
+  }
 
   // Initialize the AudioPlayerService singleton
   final audioService = AudioPlayerService();
   await audioService.initialize();
 
-  runApp(const MainApp());
+  runApp(const RestartWidget(child: MainApp()));
 }
 
 // Filters a specific, known-to-be-benign debug assertion spam from MouseTracker
@@ -251,9 +280,8 @@ class _MainAppState extends State<MainApp> {
         ChangeNotifierProvider<LibraryProvider>(
           create: (_) => LibraryProvider()..init(),
         ),
-        ChangeNotifierProvider<SettingsService>(
-          create: (_) => SettingsService()..init(),
-        ),
+        // Use the already-initialized singleton and prevent Provider from disposing it
+        ChangeNotifierProvider<SettingsService>.value(value: SettingsService()),
       ],
       child: ToastificationWrapper(
         child: Consumer<SettingsService>(
@@ -261,7 +289,22 @@ class _MainAppState extends State<MainApp> {
             return MaterialApp(
               debugShowCheckedModeBanner: false,
               onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
-              theme: ThemeData(primaryColorDark: bgcolor, useMaterial3: true),
+              theme: ThemeData(
+                primaryColorDark: bgcolor,
+                useMaterial3: true,
+                snackBarTheme: SnackBarThemeData(
+                  backgroundColor: appbarcolor,
+                  elevation: 8.0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16.0),
+                  ),
+                  behavior: SnackBarBehavior.floating,
+                  contentTextStyle: TextStyle(
+                    color: txtcolor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
               locale: _toLocale(settings.localeCode),
               localizationsDelegates: AppLocalizations.localizationsDelegates,
               supportedLocales: AppLocalizations.supportedLocales,

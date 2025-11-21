@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:dio_smart_retry/dio_smart_retry.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
+import 'package:sautifyv2/services/dio_client.dart';
 
 import '../apis/api.dart';
 import '../models/music_model.dart';
@@ -34,37 +34,7 @@ class Api implements MusicAPI {
 
     // 2) Fallback to HTTP API using Dio with smart retry (Okatsu)
     try {
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 20),
-          receiveTimeout: const Duration(seconds: 45),
-          sendTimeout: const Duration(seconds: 20),
-          responseType: ResponseType.json,
-          // We accept JSON; Dio will decode to Map if possible.
-          contentType: 'application/json',
-        ),
-      );
-
-      dio.interceptors.add(
-        RetryInterceptor(
-          dio: dio,
-          logPrint: (obj) {},
-          retries: 2,
-          retryDelays: const [Duration(seconds: 3), Duration(seconds: 6)],
-          // Retry on network errors/timeouts and 5xx
-          retryEvaluator: (error, attempt) {
-            if (error.type == DioExceptionType.cancel) return false;
-            if (error.type == DioExceptionType.connectionTimeout ||
-                error.type == DioExceptionType.receiveTimeout ||
-                error.type == DioExceptionType.sendTimeout ||
-                error.type == DioExceptionType.connectionError) {
-              return true;
-            }
-            final status = error.response?.statusCode ?? 0;
-            return status >= 500 && status < 600;
-          },
-        ),
-      );
+      final dio = DioClient.instance;
 
       final youtubeUrl = 'https://www.youtube.com/watch?v=$videoId';
       final resp = await dio.get(

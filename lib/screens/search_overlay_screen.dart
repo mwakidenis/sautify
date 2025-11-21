@@ -119,6 +119,36 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
           final isKeyboardOpen = bottomInset > 0;
           final contentBottomPadding = isKeyboardOpen ? 16.0 : 100.0;
           final settings = context.watch<SettingsService>();
+          final searchProvider = context.watch<SearchProvider>();
+
+          // Show SnackBar when timeout error appears
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (searchProvider.error != null &&
+                searchProvider.error!.toLowerCase().contains('timeout')) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(searchProvider.error!),
+                    backgroundColor: Colors.deepOrange,
+                    action: SnackBarAction(
+                      label: 'Retry',
+                      textColor: Colors.white,
+                      onPressed: () {
+                        final p = Provider.of<SearchProvider>(
+                          context,
+                          listen: false,
+                        );
+                        p.retrySearch();
+                      },
+                    ),
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+              }
+            }
+          });
+
           // If suggestions are disabled, ensure they are cleared once
           if (!settings.showSearchSuggestions) {
             final p = Provider.of<SearchProvider>(context, listen: false);
@@ -802,9 +832,9 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 valueListenable: _busy,
                 builder: (context, busy, __) {
                   return Opacity(
-                    opacity: (busy || audioService.isPreparing.value) ? 0.6 : 1,
+                    opacity: busy ? 0.6 : 1,
                     child: AbsorbPointer(
-                      absorbing: busy || audioService.isPreparing.value,
+                      absorbing: busy,
                       child: _buildResultTile(
                         context,
                         track,
@@ -891,7 +921,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
         trailing: ValueListenableBuilder<bool>(
           valueListenable: _busy,
           builder: (context, busy, __) {
-            final isDisabled = busy || audioService.isPreparing.value;
+            final isDisabled = busy;
             return isDisabled
                 ? SizedBox(
                     width: 24,
@@ -906,7 +936,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
           },
         ),
         onTap: () async {
-          if (_busy.value || audioService.isPreparing.value) return;
+          if (_busy.value) return;
           _busy.value = true;
 
           final mutablePlaylist = List<StreamingData>.from(list);

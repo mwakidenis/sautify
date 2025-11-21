@@ -25,13 +25,18 @@ class SettingsService extends ChangeNotifier {
   static const _kDefaultSpeed = 'default_playback_speed';
   static const _kDefaultShuffle = 'default_shuffle';
   static const _kDefaultLoopMode = 'default_loop_mode'; // off | one | all
+  static const _kAudioBackend = 'audio_backend'; // system | mediakit
   // New keys
   static const _kDefaultVolume = 'default_volume'; // 0.0 - 1.0
   static const _kPreferredQuality = 'preferred_quality'; // low | medium | high
   static const _kLocaleCode = 'locale_code'; // e.g., en, sw, sw-KE
+  static const _kDownloadPath = 'download_path';
   // Search-related keys (Hive-backed)
   static const _kShowRecentSearches = 'show_recent_searches';
   static const _kShowSearchSuggestions = 'show_search_suggestions';
+  // Equalizer settings keys
+  static const _kEqualizerEnabled = 'equalizer_enabled';
+  static const _kEqualizerBands = 'equalizer_bands'; // index:gain,index:gain
 
   // Defaults
   bool duckOnInterruption = true;
@@ -45,9 +50,15 @@ class SettingsService extends ChangeNotifier {
   double defaultVolume = 1.0; // 0.0 - 1.0
   String preferredQuality = 'medium'; // low | medium | high
   String localeCode = 'en'; // default English
+  String audioBackend = 'system'; // system | mediakit
+  String downloadPath =
+      '/storage/emulated/0/Music'; // Default Android Music folder
   // Search-related defaults (OFF as requested)
   bool showRecentSearches = false;
   bool showSearchSuggestions = false;
+  // Equalizer settings defaults
+  bool equalizerEnabled = false;
+  Map<int, double> equalizerBands = {};
 
   bool get isReady => _ready;
 
@@ -67,6 +78,8 @@ class SettingsService extends ChangeNotifier {
     // New loads
     defaultVolume = _prefs.getDouble(_kDefaultVolume) ?? defaultVolume;
     preferredQuality = _prefs.getString(_kPreferredQuality) ?? preferredQuality;
+    audioBackend = _prefs.getString(_kAudioBackend) ?? audioBackend;
+    downloadPath = _prefs.getString(_kDownloadPath) ?? downloadPath;
     // Prefer Hive for locale (requested), fallback to SharedPreferences
     final hiveLocale = _box?.get(_kLocaleCode) as String?;
     localeCode = hiveLocale ?? _prefs.getString(_kLocaleCode) ?? localeCode;
@@ -75,6 +88,29 @@ class SettingsService extends ChangeNotifier {
         (_box?.get(_kShowRecentSearches) as bool?) ?? showRecentSearches;
     showSearchSuggestions =
         (_box?.get(_kShowSearchSuggestions) as bool?) ?? showSearchSuggestions;
+    // Load equalizer settings
+    equalizerEnabled =
+        (_prefs.getBool(_kEqualizerEnabled) ?? equalizerEnabled);
+    final loadedBands = _prefs.getString(_kEqualizerBands);
+    if (loadedBands != null) {
+      try {
+        final List<String> pairs = loadedBands.split(',');
+        final Map<int, double> bandsMap = {};
+        for (var pair in pairs) {
+          final indexGain = pair.split(':');
+          if (indexGain.length == 2) {
+            final index = int.tryParse(indexGain[0]);
+            final gain = double.tryParse(indexGain[1]);
+            if (index != null && gain != null) {
+              bandsMap[index] = gain;
+            }
+          }
+        }
+        equalizerBands = bandsMap;
+      } catch (e) {
+        // Handle potential format errors silently
+      }
+    }
     _ready = true;
     notifyListeners();
   }
@@ -136,11 +172,24 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setAudioBackend(String value) async {
+    if (!['system', 'mediakit'].contains(value)) return;
+    audioBackend = value;
+    await _prefs.setString(_kAudioBackend, audioBackend);
+    notifyListeners();
+  }
+
   Future<void> setLocaleCode(String code) async {
     localeCode = code;
     // Write to Hive as source-of-truth, keep SharedPreferences for compatibility
     await _box?.put(_kLocaleCode, localeCode);
     await _prefs.setString(_kLocaleCode, localeCode);
+    notifyListeners();
+  }
+
+  Future<void> setDownloadPath(String path) async {
+    downloadPath = path;
+    await _prefs.setString(_kDownloadPath, path);
     notifyListeners();
   }
 
@@ -157,6 +206,23 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Equalizer settings setters
+  Future<void> setEqualizerEnabled(bool value) async {
+    equalizerEnabled = value;
+    await _prefs.setBool(_kEqualizerEnabled, value);
+    notifyListeners();
+  }
+
+  Future<void> setEqualizerBand(int index, double gain) async {
+    equalizerBands[index] = gain;
+    // Serialize map to string "index:gain,index:gain"
+    final String serialized = equalizerBands.entries
+        .map((e) => '${e.key}:${e.value}')
+        .join(',');
+    await _prefs.setString(_kEqualizerBands, serialized);
+    notifyListeners();
+  }
+
   Future<void> resetToDefaults() async {
     duckOnInterruption = true;
     duckVolume = 0.5;
@@ -168,8 +234,11 @@ class SettingsService extends ChangeNotifier {
     defaultVolume = 1.0;
     preferredQuality = 'medium';
     localeCode = 'en';
+    audioBackend = 'system';
     showRecentSearches = false;
     showSearchSuggestions = false;
+    equalizerEnabled = false;
+    equalizerBands = {};
 
     await _prefs.setBool(_kDuckOnInterruption, duckOnInterruption);
     await _prefs.setDouble(_kDuckVolume, duckVolume);
@@ -180,10 +249,13 @@ class SettingsService extends ChangeNotifier {
     await _prefs.setString(_kDefaultLoopMode, defaultLoopMode);
     await _prefs.setDouble(_kDefaultVolume, defaultVolume);
     await _prefs.setString(_kPreferredQuality, preferredQuality);
+    await _prefs.setString(_kAudioBackend, audioBackend);
     await _box?.put(_kLocaleCode, localeCode);
     await _box?.put(_kShowRecentSearches, showRecentSearches);
     await _box?.put(_kShowSearchSuggestions, showSearchSuggestions);
     await _prefs.setString(_kLocaleCode, localeCode);
+    await _prefs.setBool(_kEqualizerEnabled, equalizerEnabled);
+    await _prefs.setString(_kEqualizerBands, '');
 
     notifyListeners();
   }

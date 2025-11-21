@@ -24,13 +24,18 @@ import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:marquee/marquee.dart';
 import 'package:material_color_utilities/material_color_utilities.dart' as mcu;
 import 'package:material_new_shapes/material_new_shapes.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
+import 'package:provider/provider.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/db/library_store.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/models/track_info.dart';
 import 'package:sautifyv2/screens/current_playlist_screen.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
+import 'package:sautifyv2/services/download_service.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
+import 'package:sautifyv2/services/settings_service.dart';
 import 'package:sautifyv2/widgets/playlist_loading_progress.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -679,6 +684,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
         IconButton(
+          onPressed: _downloadCurrentTrack,
+          icon: Icon(Icons.download_rounded, color: iconcolor, size: 28),
+        ),
+        IconButton(
           onPressed: () async {
             final t =
                 _audioService.currentTrack ??
@@ -1310,6 +1319,150 @@ class _PlayerScreenState extends State<PlayerScreen> {
       clamped,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOut,
+    );
+  }
+
+  Future<void> _downloadCurrentTrack() async {
+    final track = _audioService.currentTrack;
+    if (track == null || track.streamUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No track loaded to download')),
+      );
+      return;
+    }
+
+    // Check permissions
+    if (Platform.isAndroid) {
+      var status = await Permission.storage.status;
+      if (!status.isGranted) {
+        status = await Permission.storage.request();
+      }
+
+      // If denied, try manage external storage (for Android 11+)
+      if (!status.isGranted) {
+        if (await Permission.manageExternalStorage.status.isDenied) {
+          await Permission.manageExternalStorage.request();
+        }
+      }
+    }
+
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    final dirPath = settings.downloadPath;
+    final fileName = '${track.artist} - ${track.title}.mp3'.replaceAll(
+      RegExp(r'[<>:"/\\|?*]'),
+      '_',
+    );
+    final savePath = '$dirPath/$fileName';
+
+    // Ensure directory exists
+    try {
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Cannot create directory: $e')));
+      return;
+    }
+
+    // Show dialog
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return _DownloadProgressDialog(
+          url: track.streamUrl!,
+          savePath: savePath,
+        );
+      },
+    );
+  }
+}
+
+class _DownloadProgressDialog extends StatefulWidget {
+  final String url;
+  final String savePath;
+  const _DownloadProgressDialog({required this.url, required this.savePath});
+
+  @override
+  State<_DownloadProgressDialog> createState() =>
+      _DownloadProgressDialogState();
+}
+
+class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
+  double _progress = 0.0;
+  String _status = 'Starting...';
+
+  @override
+  void initState() {
+    super.initState();
+    _startDownload();
+  }
+
+  void _startDownload() {
+    DownloadService.startDownload(
+      url: widget.url,
+      savePath: widget.savePath,
+      onProgress: (received, total) {
+        if (mounted) {
+          setState(() {
+            _progress = total > 0 ? received / total : 0.0;
+            _status = '${(_progress * 100).toStringAsFixed(1)}%';
+          });
+        }
+      },
+      onDone: () {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Saved to ${widget.savePath}')),
+          );
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Download failed: $error')));
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: cardcolor,
+      title: Text('Downloading...', style: TextStyle(color: txtcolor)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LinearProgressIndicatorM3E(
+            value: _progress,
+            trackColor: txtcolor.withAlpha(30),
+            activeColor: appbarcolor,
+          ),
+          const SizedBox(height: 16),
+          Text(_status, style: TextStyle(color: txtcolor)),
+          const SizedBox(height: 8),
+          Text(
+            widget.savePath,
+            style: TextStyle(color: txtcolor.withAlpha(150), fontSize: 12),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Cancel', style: TextStyle(color: txtcolor)),
+        ),
+      ],
     );
   }
 }

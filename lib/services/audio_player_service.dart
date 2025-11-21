@@ -25,11 +25,51 @@ import 'package:sautifyv2/services/settings_service.dart';
 import '../isolate/playlist_worker.dart' show playlistWorkerEntry;
 
 class AudioPlayerService extends ChangeNotifier {
-  static final AudioPlayerService _instance = AudioPlayerService._internal();
-  factory AudioPlayerService() => _instance;
-  AudioPlayerService._internal();
+  static AudioPlayerService? _instance;
+  factory AudioPlayerService() => _instance ??= AudioPlayerService._internal();
 
-  final AudioPlayer _player = AudioPlayer();
+  final AndroidEqualizer _equalizer = AndroidEqualizer();
+  late final AudioPlayer _player;
+
+  AudioPlayerService._internal() {
+    final settings = SettingsService();
+    // Only use AudioPipeline (and Equalizer) if NOT using MediaKit backend
+    if (settings.audioBackend != 'mediakit') {
+      _player = AudioPlayer(
+        audioPipeline: AudioPipeline(androidAudioEffects: [_equalizer]),
+      );
+      _applyEqualizerSettings();
+    } else {
+      _player = AudioPlayer();
+    }
+  }
+
+  Future<void> _applyEqualizerSettings() async {
+    final settings = SettingsService();
+    if (!settings.isReady) {
+      await settings.init();
+    }
+    // Skip if using MediaKit
+    if (settings.audioBackend == 'mediakit') return;
+
+    try {
+      await _equalizer.setEnabled(settings.equalizerEnabled);
+      final parameters = await _equalizer.parameters;
+      for (final entry in settings.equalizerBands.entries) {
+        final band = parameters.bands.firstWhere(
+          (b) => b.index == entry.key,
+          orElse: () => parameters
+              .bands[0], // Fallback, though unlikely if index is valid
+        );
+        if (band.index == entry.key) {
+          await band.setGain(entry.value);
+        }
+      }
+    } catch (_) {
+      // Equalizer might not be available on this device/platform
+    }
+  }
+
   final MusicStreamingService _streamingService = MusicStreamingService();
   final ImageCacheService _imageCacheService = ImageCacheService();
   // Progressive incremental insertion state
@@ -46,7 +86,7 @@ class AudioPlayerService extends ChangeNotifier {
   static const int _isolateThreshold = 80; // min tracks to offload
   bool enableProgressiveIsolate = true; // feature flag
   // New: enforce resolving all stream URLs before feeding the player
-  bool resolveAllBeforeFeeding = true; // set true to guarantee full metadata
+  bool resolveAllBeforeFeeding = false; // set true to guarantee full metadata
   final Duration _isolateOverallTimeout = const Duration(seconds: 6);
   Stopwatch? _currentLoadStopwatch;
   DateTime? _firstProgressAt;
@@ -115,6 +155,13 @@ class AudioPlayerService extends ChangeNotifier {
       final send = _playlistWorkerSendPort;
       if (send == null) return null;
       final int localReqId = ++_playlistWorkerRequestCounter;
+
+      // Cleanup old pending requests to prevent leaks
+      if (_pendingWorkerRequests.length > 10) {
+        final cutoff = localReqId - 20;
+        _pendingWorkerRequests.removeWhere((key, _) => key < cutoff);
+      }
+
       final completer = Completer<Map<String, dynamic>>();
       _pendingWorkerRequests[localReqId] = completer;
       // Prepare lightweight serializable track list
@@ -415,7 +462,8 @@ class AudioPlayerService extends ChangeNotifier {
     final session = await AudioSession.instance;
     await session.configure(AudioSessionConfiguration.music());
 
-    // Crossfade not supported with current just_audio version; value persisted for future use
+    // Crossfade: current just_audio version without advanced feature flag lacks runtime API here.
+    // Placeholder: when upgrading to version that exposes crossfade APIs, apply settings.crossfadeSeconds.
 
     // Apply default speed, shuffle, loop
     try {
@@ -483,14 +531,10 @@ class AudioPlayerService extends ChangeNotifier {
       }
     });
 
-    // Android-specific audio attributes for media playback
-    await _player.setAndroidAudioAttributes(
-      const AndroidAudioAttributes(
-        contentType: AndroidAudioContentType.music,
-        usage: AndroidAudioUsage.media,
-        flags: AndroidAudioFlags.none,
-      ),
-    );
+    // Note: We intentionally avoid calling setAndroidAudioAttributes.
+    // Audio focus and attributes are handled via audio_session configuration above.
+    // Calling setAndroidAudioAttributes may throw UnimplementedError when using
+    // the just_audio_media_kit backend or on some platforms.
 
     // Emit initial current track
     _currentTrackController.add(currentTrack);
@@ -550,10 +594,23 @@ class AudioPlayerService extends ChangeNotifier {
         final t = currentTrack;
         if (t != null && t.videoId != _lastRecentVideoId) {
           LibraryStore.addRecent(t);
+          LibraryStore.incrementPlayCount(t);
           _lastRecentVideoId = t.videoId;
         }
       }
     });
+  }
+
+  /// Re-apply dynamic settings that can change at runtime (speed, volume)
+  Future<void> refreshDynamicSettings() async {
+    final settings = SettingsService();
+    if (!settings.isReady) return;
+    try {
+      await _player.setSpeed(settings.defaultPlaybackSpeed);
+    } catch (_) {}
+    try {
+      await _player.setVolume(settings.defaultVolume);
+    } catch (_) {}
   }
 
   /// Backwards compatible API: always forces full replace semantics.
@@ -622,12 +679,10 @@ class AudioPlayerService extends ChangeNotifier {
       return false;
     }
     // If we are actually replacing with a different queue and caller requests
-    // a smooth transition, pause first so old audio stops immediately.
+    // a smooth transition, stop first so old audio stops immediately.
     if (withTransition) {
       try {
-        await _player.pause();
-        // tiny delay to let UI/state settle
-        await Future.delayed(const Duration(milliseconds: 40));
+        await _player.stop();
       } catch (_) {}
     }
     _playlistFingerprint = newFp;
@@ -635,10 +690,31 @@ class AudioPlayerService extends ChangeNotifier {
     final int requestId = ++_loadRequestId;
     _setPreparing(true);
     try {
+      // Capture old images before replacing to clear unused ones later
+      final oldImages = _playlist
+          .map((t) => t.thumbnailUrl)
+          .where((url) => url != null)
+          .cast<String>()
+          .toSet();
+
       _playlist = cappedTracks;
       _currentIndex = cappedInitialIndex;
       _materializedIndices.clear();
       _preloadedIndices.clear();
+
+      // Calculate unused images and remove them from cache to save memory
+      final newImages = _playlist
+          .map((t) => t.thumbnailUrl)
+          .where((url) => url != null)
+          .cast<String>()
+          .toSet();
+
+      final unused = oldImages.difference(newImages);
+      if (unused.isNotEmpty) {
+        // Run in background to avoid blocking playback start
+        Future.microtask(() => _imageCacheService.removeSpecificImages(unused));
+      }
+
       _currentLoadStopwatch = Stopwatch()..start();
       _loadStartAt = DateTime.now();
       _firstProgressAt = null;
@@ -651,104 +727,102 @@ class AudioPlayerService extends ChangeNotifier {
       // Progress overlay has been disabled - songs stream in background
       loadingProgress.value = null;
 
+      final quality = _getPreferredQuality();
       if (resolveAllBeforeFeeding) {
         await _resolveAllTracksThenBuild(
           requestId: requestId,
           autoPlay: autoPlay,
         );
       } else {
-        // Original progressive/small playlist handling (unchanged)
-        final bool largeAndProgressive =
-            _playlist.length >= _isolateThreshold && enableProgressiveIsolate;
+        // Prioritize current track and a few neighbors for faster first play
+        final critical = <int>{_currentIndex};
+        if (_currentIndex - 1 >= 0) critical.add(_currentIndex - 1);
+        if (_currentIndex + 1 < _playlist.length)
+          critical.add(_currentIndex + 1);
+        if (_currentIndex + 2 < _playlist.length)
+          critical.add(_currentIndex + 2);
 
-        if (!largeAndProgressive &&
-            _currentIndex >= 0 &&
-            _currentIndex < _playlist.length &&
-            !_playlist[_currentIndex].isReady) {
-          await _ensureTrackReady(_currentIndex, requestId: requestId);
-          if (requestId != _loadRequestId) return true;
+        Future<void> resolveIndex(int idx) async {
+          if (_playlist[idx].isReady && _playlist[idx].streamUrl != null)
+            return;
+          final r = await _streamingService.fetchStreamingData(
+            _playlist[idx].videoId,
+            quality,
+          );
+          if (r != null) {
+            final old = _playlist[idx];
+            _playlist[idx] = old.copyWith(
+              streamUrl: r.streamUrl,
+              quality: r.quality,
+              cachedAt: r.cachedAt,
+              isAvailable: true,
+              title: old.title.isNotEmpty ? old.title : r.title,
+              artist: old.artist.isNotEmpty ? old.artist : r.artist,
+              duration: old.duration ?? r.duration,
+              thumbnailUrl: r.thumbnailUrl ?? old.thumbnailUrl,
+            );
+          }
         }
 
-        if (largeAndProgressive) {
-          _cancelProgressiveBuild();
-          final prefetchIndices = <int>{_currentIndex};
-          if (_currentIndex + 1 < _playlist.length)
-            prefetchIndices.add(_currentIndex + 1);
-          if (_currentIndex + 2 < _playlist.length)
-            prefetchIndices.add(_currentIndex + 2);
-          final futures = <Future<void>>[];
-          for (final i in prefetchIndices) {
-            if (_playlist[i].isReady) continue;
-            futures.add(() async {
-              final r = await _streamingService.fetchStreamingData(
-                _playlist[i].videoId,
-                _getPreferredQuality(),
-              );
-              if (r != null) {
-                final old = _playlist[i];
-                _playlist[i] = old.copyWith(
-                  streamUrl: r.streamUrl,
-                  quality: r.quality,
-                  cachedAt: r.cachedAt,
-                  isAvailable: true,
-                  title: old.title.isNotEmpty ? old.title : r.title,
-                  artist: old.artist.isNotEmpty ? old.artist : r.artist,
-                  duration: old.duration ?? r.duration,
-                  thumbnailUrl: r.thumbnailUrl ?? old.thumbnailUrl,
-                );
-              }
-            }());
-          }
-          if (futures.isNotEmpty) {
-            await futures.first;
-          }
-          if (_playlist[_currentIndex].isReady &&
-              _playlist[_currentIndex].streamUrl != null) {
-            await _setMinimalSingleSource(_currentIndex, autoPlay: autoPlay);
-            _firstPlayableAt ??= DateTime.now();
-            if (autoPlay) {
-              _setPreparing(false);
-            }
-          }
-          // ignore: discarded_futures
-          _startProgressiveIsolateBuild(
-            requestId: requestId,
-            autoPlay: autoPlay,
-            initialFastMode: true,
-          );
-        } else {
-          await _rebuildAudioSource(
-            preferPlaylistIndex: _currentIndex,
-            preservePosition: false,
-            requestId: requestId,
-          );
-          if (autoPlay) {
-            final readyAndMapped =
-                _currentIndex < _playlist.length &&
-                _playlist[_currentIndex].isReady &&
-                _childToPlaylistIndex.contains(_currentIndex);
-            if (readyAndMapped) {
-              await _player.play();
-            } else {
-              await seek(Duration.zero, index: _currentIndex);
-              if (withTransition) {
-                // ensure playback kicks in once prepared
-                try {
-                  await _player.play();
-                } catch (_) {}
-              }
-            }
-          }
+        // 1. Resolve CURRENT track immediately and play
+        await resolveIndex(_currentIndex);
 
-          final loadedCount = _playlist
-              .where((t) => t.isReady && t.streamUrl != null)
-              .length;
-          loadingProgress.value = LoadingProgress(
-            totalTracks: _playlist.length,
-            loadedTracks: loadedCount,
-            failedTracks: 0,
-            phase: LoadingPhase.complete,
-          );
+        if (requestId != _loadRequestId) return false;
+
+        // Minimal single-source build for the first track if ready
+        if (_playlist[_currentIndex].isReady &&
+            _playlist[_currentIndex].streamUrl != null) {
+          await _setMinimalSingleSource(_currentIndex, autoPlay: autoPlay);
+          _firstPlayableAt ??= DateTime.now();
+          if (autoPlay) _setPreparing(false);
+
+          // For large playlists, start progressive isolate build to assemble full source in background
+          final largeAndProgressive =
+              _playlist.length >= _isolateThreshold && enableProgressiveIsolate;
+          if (largeAndProgressive) {
+            // ignore: discarded_futures
+            _startProgressiveIsolateBuild(
+              requestId: requestId,
+              autoPlay: autoPlay,
+              initialFastMode: true,
+            );
+          }
+        }
+
+        // 2. Resolve neighbors (previous/next) in background
+        final neighbors = critical.where((i) => i != _currentIndex).toList();
+        for (final idx in neighbors) {
+          if (requestId != _loadRequestId) return false;
+          await resolveIndex(idx);
+        }
+
+        // Fire-and-forget background resolution of remaining tracks
+        final remaining = <int>[];
+        for (int i = 0; i < _playlist.length; i++) {
+          if (critical.contains(i)) continue;
+          if (!_playlist[i].isReady || _playlist[i].streamUrl == null) {
+            remaining.add(i);
+          }
+        }
+        if (remaining.isNotEmpty) {
+          () async {
+            final futures = <Future<void>>[];
+            for (final idx in remaining) {
+              futures.add(resolveIndex(idx));
+            }
+            try {
+              await Future.wait(futures, eagerError: false);
+            } catch (_) {}
+            if (requestId != _loadRequestId) return;
+            try {
+              await _rebuildAudioSource(
+                preferPlaylistIndex: _currentIndex,
+                preservePosition: true,
+                requestId: requestId,
+              );
+            } catch (_) {}
+            _warmNextConnection();
+          }();
         }
       }
 
@@ -819,12 +893,22 @@ class AudioPlayerService extends ChangeNotifier {
   Future<void> addTrack(StreamingData track) async {
     _playlist.add(track);
 
+    // Prune history if playlist gets too long and we are far ahead
+    // This prevents memory growth during long sessions
+    bool pruned = false;
+    if (_playlist.length > 50 && _currentIndex > 20) {
+      // Remove the first item (oldest history)
+      // removeTrack handles _rebuildAudioSource and notifyListeners
+      await removeTrack(0);
+      pruned = true;
+    }
+
     // Rebuild audio source to keep order consistent when a track becomes ready
-    if (track.isReady) {
+    if (!pruned && track.isReady) {
       await _rebuildAudioSource();
     }
 
-    notifyListeners();
+    if (!pruned) notifyListeners();
   }
 
   // Resolve all tracks' stream URLs and metadata before building audio source
@@ -896,13 +980,35 @@ class AudioPlayerService extends ChangeNotifier {
 
     final bool wasShuffled = _player.shuffleModeEnabled;
     if (wasShuffled) await _player.setShuffleModeEnabled(false);
-    await _player.setAudioSources(
-      children,
-      initialIndex: initChildIndex,
-      initialPosition: Duration.zero,
-    );
+    try {
+      await _player.setAudioSources(
+        children,
+        initialIndex: initChildIndex,
+        initialPosition: Duration.zero,
+      );
+    } on UnimplementedError catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('setAudioSources unsupported on current backend: $e\n$st');
+      }
+      // Auto fallback: switch backend to system & notify user via debug log.
+      final settings = SettingsService();
+      if (settings.audioBackend == 'mediakit') {
+        await settings.setAudioBackend('system');
+        // Retry once with system backend (player instance remains valid)
+        try {
+          await _player.setAudioSources(
+            children,
+            initialIndex: initChildIndex,
+            initialPosition: Duration.zero,
+          );
+        } catch (_) {}
+      }
+    }
     if (wasShuffled) await _player.setShuffleModeEnabled(true);
     if (autoPlay) await _player.play();
+
+    // Immediate warm-up for current and next track now that primary is set
+    _warmNextConnection();
   }
 
   /// Issue a tiny byte-range request to the next track to warm DNS/TLS/CDN.
@@ -991,13 +1097,24 @@ class AudioPlayerService extends ChangeNotifier {
     await _player.stop();
   }
 
-  /// Seek to position
-  Future<void> seek(Duration position, {int? index}) async {
+  /// Seek to position. Returns true if successful.
+  Future<bool> seek(Duration position, {int? index}) async {
     if (index != null) {
-      if (index < 0 || index >= _playlist.length) return;
+      if (index < 0 || index >= _playlist.length) return false;
+
       // Ensure streaming info ready if needed
       await _ensureTrackReady(index);
-      if (!_playlist[index].isReady) return;
+      if (!_playlist[index].isReady) {
+        // Try one more time with force refresh if it failed
+        await _streamingService.refreshStreamingData(
+          _playlist[index].videoId,
+          _getPreferredQuality(),
+        );
+        // Re-check
+        await _ensureTrackReady(index);
+        if (!_playlist[index].isReady) return false;
+      }
+
       // If mapping doesn't include the target yet, rebuild preserving position
       if (!_childToPlaylistIndex.contains(index)) {
         await _rebuildAudioSource(
@@ -1006,7 +1123,8 @@ class AudioPlayerService extends ChangeNotifier {
         );
       }
       final childIndex = _childToPlaylistIndex.indexOf(index);
-      if (childIndex < 0) return; // still not mapped
+      if (childIndex < 0) return false; // still not mapped
+
       final effectiveIndex = _childIndexToSequenceIndex(childIndex);
       try {
         await _player.seek(position, index: effectiveIndex);
@@ -1021,10 +1139,11 @@ class AudioPlayerService extends ChangeNotifier {
         notifyListeners();
         _preloadImages();
       }
-      return;
+      return true;
     }
     // Seek within current track only
     await _player.seek(position);
+    return true;
   }
 
   /// Skip to next track
@@ -1493,6 +1612,12 @@ class AudioPlayerService extends ChangeNotifier {
     // Update mapping for later conversions
     _childToPlaylistIndex = List<int>.from(readyIndices);
 
+    // Optimization: If we are currently playing the correct track in a ConcatenatingAudioSource,
+    // and we just want to append/insert new tracks, try to do it in-place to avoid interruption.
+    // This is complex because we need to match existing children.
+    // For now, we rely on setAudioSources but we check if we can skip it if nothing changed.
+    // (Logic omitted for brevity, relying on setAudioSources for correctness)
+
     final wasPlaying = _player.playing;
     final prevPosition = _player.position;
     final desiredPlaylistIndex = (preferPlaylistIndex ?? _currentIndex).clamp(
@@ -1530,6 +1655,12 @@ class AudioPlayerService extends ChangeNotifier {
     // Before applying, ensure this call hasn't been superseded
     if (requestId != null && requestId != _loadRequestId) return;
 
+    // If we are just updating the list but the current track is the same,
+    // we might be interrupting playback.
+    // Check if we can avoid setting source if it's effectively the same for the current item.
+    // However, just_audio doesn't support seamless replacement of the whole list easily without gap.
+    // The best we can do is ensure we don't rebuild unnecessarily.
+
     // To guarantee initial index selects the intended child regardless of shuffle,
     // temporarily disable shuffle, set source with child index, then restore shuffle mode.
     final bool wasShuffled = _player.shuffleModeEnabled;
@@ -1543,6 +1674,24 @@ class AudioPlayerService extends ChangeNotifier {
         initialIndex: newChildIndex.clamp(0, children.length - 1),
         initialPosition: keepPosition ? prevPosition : Duration.zero,
       );
+    } on UnimplementedError catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          'setAudioSources unsupported on current backend (rebuild): $e\n$st',
+        );
+      }
+      final settings = SettingsService();
+      if (settings.audioBackend == 'mediakit') {
+        await settings.setAudioBackend('system');
+        // Retry once with system backend
+        try {
+          await _player.setAudioSources(
+            children,
+            initialIndex: newChildIndex.clamp(0, children.length - 1),
+            initialPosition: keepPosition ? prevPosition : Duration.zero,
+          );
+        } catch (_) {}
+      }
     } on PlayerException catch (e) {
       // Auto-recovery: attempt to refresh the failing track's URL and retry once
       if (kDebugMode) {
@@ -1673,20 +1822,61 @@ class AudioPlayerService extends ChangeNotifier {
     if (!t.isReady || t.streamUrl == null) return;
     final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
     _setMinimalChildMapping(playlistIndex);
-    await _player.setAudioSource(
-      AudioSource.uri(
-        uri,
-        tag: MediaItem(
-          id: t.videoId,
-          title: t.title,
-          artist: t.artist,
-          duration: t.duration,
-          artUri: t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
-          extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
-        ),
-      ),
-      preload: true,
-    );
+    try {
+      // Use setAudioSources (plural) to create a ConcatenatingAudioSource with 1 item
+      // This allows future updates to potentially append to it seamlessly.
+      await _player.setAudioSources(
+        [
+          AudioSource.uri(
+            uri,
+            tag: MediaItem(
+              id: t.videoId,
+              title: t.title,
+              artist: t.artist,
+              duration: t.duration,
+              artUri: t.thumbnailUrl != null
+                  ? Uri.tryParse(t.thumbnailUrl!)
+                  : null,
+              extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
+            ),
+          ),
+        ],
+        initialIndex: 0,
+        initialPosition: Duration.zero,
+      );
+    } on UnimplementedError catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          'setAudioSources unsupported on current backend (minimal single): $e\n$st',
+        );
+      }
+      final settings = SettingsService();
+      if (settings.audioBackend == 'mediakit') {
+        await settings.setAudioBackend('system');
+        // Retry once with system backend
+        try {
+          await _player.setAudioSources(
+            [
+              AudioSource.uri(
+                uri,
+                tag: MediaItem(
+                  id: t.videoId,
+                  title: t.title,
+                  artist: t.artist,
+                  duration: t.duration,
+                  artUri: t.thumbnailUrl != null
+                      ? Uri.tryParse(t.thumbnailUrl!)
+                      : null,
+                  extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
+                ),
+              ),
+            ],
+            initialIndex: 0,
+            initialPosition: Duration.zero,
+          );
+        } catch (_) {}
+      }
+    }
     if (autoPlay) {
       await _player.play();
     }
@@ -1915,16 +2105,6 @@ class AudioPlayerService extends ChangeNotifier {
     }
   }
 
-  void _cancelProgressiveBuild() {
-    final send = _playlistWorkerSendPort;
-    final prev = _currentProgressiveWorkerReqId;
-    if (send != null && prev != null) {
-      try {
-        send.send({'cmd': 'cancel', 'requestId': prev});
-      } catch (_) {}
-    }
-  }
-
   /// Handle playback completion
   Future<void> _handlePlaybackCompleted() async {
     if (_playlist.isEmpty) {
@@ -1940,24 +2120,6 @@ class AudioPlayerService extends ChangeNotifier {
       return;
     }
 
-    if (_loopMode == LoopMode.all) {
-      // Move to next according to current shuffle/order
-      await skipToNext();
-      return;
-    }
-
-    // No loop: if there is a next track, play it; otherwise stop
-    final hasNext = _currentIndex < _playlist.length - 1;
-    if (hasNext || _isShuffleEnabled) {
-      await skipToNext();
-    } else {
-      await _player.stop();
-      notifyListeners();
-    }
-  }
-
-  /// Clear media-related caches (images and expired stream URLs)
-  void clearCache() {
     try {
       _imageCacheService.clearCache();
     } catch (_) {}
@@ -1965,6 +2127,9 @@ class AudioPlayerService extends ChangeNotifier {
       _streamingService.clearExpiredCache();
     } catch (_) {}
   }
+
+  // Expose equalizer
+  AndroidEqualizer get equalizer => _equalizer;
 }
 
 /// Immutable lightweight snapshot for simple UI consumers that only need

@@ -50,6 +50,13 @@ class HomeNotifier extends ChangeNotifier {
   bool get isLoading => _homeScreenService.isLoading;
   bool get isInitialized => _isInitialized;
   String? get error => _error;
+  HomeDataSource get servedFrom => _homeScreenService.servedFrom;
+  bool get isStale => _homeScreenService.isStale;
+
+  Future<void> refresh({Duration? timeout}) async {
+    await _homeScreenService.refresh(timeout: timeout);
+    notifyListeners();
+  }
 
   List<Section> get sections => homeData?.sections ?? [];
 }

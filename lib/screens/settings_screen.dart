@@ -1,714 +1,532 @@
-/*
-Copyright (c) 2025 Wambugu Kinyua
-Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
-https://creativecommons.org/licenses/by/4.0/
-*/
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/strings.dart';
-import 'package:sautifyv2/services/audio_player_service.dart';
+import 'package:sautifyv2/screens/equalizer_screen.dart';
 import 'package:sautifyv2/services/settings_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sautifyv2/services/update_service.dart';
+import 'package:sautifyv2/utils/restart_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SettingsService>(
-      builder: (context, settings, _) {
-        if (!settings.isReady) {
-          return Scaffold(
-            backgroundColor: bgcolor,
-            appBar: AppBar(
-              title: const Text(
-                'Settings',
-                style: TextStyle(
-                  fontFamily: 'asimovian',
-                  fontWeight: FontWeight.bold,
-                  fontSize: 22,
-                ),
-              ),
-              backgroundColor: appbarcolor,
-              foregroundColor: Colors.white,
-            ),
-            body: const Center(child: CircularProgressIndicator()),
-          );
-        }
+    final settings = Provider.of<SettingsService>(context);
+    final locale = settings.localeCode;
 
-        final audio = AudioPlayerService();
+    if (!settings.isReady) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
-        return Scaffold(
-          backgroundColor: bgcolor,
-          appBar: AppBar(
-            centerTitle: true,
-            title: const Text(
-              'Settings',
-              style: TextStyle(
-                fontFamily: 'Roboto',
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
+    return Scaffold(
+      backgroundColor: bgcolor,
+      appBar: AppBar(
+        backgroundColor: bgcolor,
+        elevation: 0,
+        title: Text(
+          AppStrings.settingsTitle(locale),
+          style: TextStyle(color: txtcolor, fontWeight: FontWeight.bold),
+        ),
+        iconTheme: IconThemeData(color: iconcolor),
+      ),
+      body: ListTileTheme(
+        iconColor: appbarcolor,
+        textColor: txtcolor,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
+          children: [
+            _sectionHeader(AppStrings.playback(locale)),
+            _sectionCard([
+              _dropdownTile<double>(
+                context,
+                title: AppStrings.playbackSpeed(locale),
+                subtitle: 'Applies to newly started tracks',
+                current: settings.defaultPlaybackSpeed,
+                items: const [0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0],
+                itemLabel: (v) => '${v}x',
+                onChanged: (v) => settings.setDefaultPlaybackSpeed(v),
               ),
-            ),
-            backgroundColor: bgcolor,
-            foregroundColor: Colors.white,
-          ),
-          body: Theme(
-            data: Theme.of(context).copyWith(
-              sliderTheme: SliderTheme.of(context).copyWith(
-                activeTrackColor: appbarcolor,
-                thumbColor: appbarcolor,
-                overlayColor: appbarcolor.withAlpha(48),
-                inactiveTrackColor: iconcolor.withAlpha(60),
+              _tileDivider(),
+              SwitchListTile(
+                value: settings.defaultShuffle,
+                title: Text(AppStrings.enableShuffleByDefault(locale)),
+                subtitle: Text(AppStrings.shuffleOnStart(locale)),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setDefaultShuffle(v),
               ),
-              switchTheme: SwitchThemeData(
-                thumbColor: WidgetStateProperty.resolveWith((s) => appbarcolor),
-                trackColor: WidgetStateProperty.resolveWith(
-                  (s) => appbarcolor.withAlpha(
-                    s.contains(WidgetState.selected) ? 180 : 80,
+              _tileDivider(),
+              _dropdownTile<String>(
+                context,
+                title: AppStrings.loopMode(locale),
+                current: settings.defaultLoopMode,
+                items: const ['off', 'one', 'all'],
+                itemLabel: (v) {
+                  switch (v) {
+                    case 'one':
+                      return AppStrings.repeatOne(locale);
+                    case 'all':
+                      return AppStrings.repeatAll(locale);
+                    default:
+                      return AppStrings.off(locale);
+                  }
+                },
+                onChanged: (v) => settings.setDefaultLoopMode(v),
+              ),
+              _tileDivider(),
+              _dropdownTile<double>(
+                context,
+                title: AppStrings.defaultVolume(locale),
+                subtitle: 'New tracks will start at this volume',
+                current: settings.defaultVolume,
+                items: const [0.4, 0.6, 0.8, 1.0],
+                itemLabel: (v) => '${(v * 100).round()}%',
+                onChanged: (v) => settings.setDefaultVolume(v),
+              ),
+              _tileDivider(),
+              _dropdownTile<String>(
+                context,
+                title: AppStrings.preferredAudioQuality(locale),
+                subtitle: AppStrings.willApplyToNewTracks(locale),
+                current: settings.preferredQuality,
+                items: const ['low', 'medium', 'high'],
+                itemLabel: (v) {
+                  switch (v) {
+                    case 'low':
+                      return AppStrings.lowQuality(locale);
+                    case 'high':
+                      return AppStrings.highQuality(locale);
+                    default:
+                      return AppStrings.mediumQuality(locale);
+                  }
+                },
+                onChanged: (v) => settings.setPreferredQuality(v),
+              ),
+              _tileDivider(),
+              ListTile(
+                title: const Text('Equalizer'),
+                subtitle: const Text('Adjust audio frequencies (Android only)'),
+                leading: const Icon(Icons.equalizer),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const EqualizerScreen(),
+                    ),
+                  );
+                },
+              ),
+              _tileDivider(),
+              ListTile(
+                title: Text(AppStrings.crossfadeComingSoon(locale)),
+                subtitle: const Text('Not yet implemented'),
+                trailing: const Icon(Icons.hourglass_empty),
+              ),
+            ]),
+
+            _sectionHeader(AppStrings.audioFocus(locale)),
+            _sectionCard([
+              SwitchListTile(
+                value: settings.duckOnInterruption,
+                title: Text(AppStrings.duckOnInterruption(locale)),
+                subtitle: Text(AppStrings.lowerVolumeOnInterruption(locale)),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setDuckOnInterruption(v),
+              ),
+              _tileDivider(),
+              _dropdownTile<double>(
+                context,
+                title: AppStrings.duckVolume(locale),
+                current: settings.duckVolume,
+                items: const [0.2, 0.3, 0.4, 0.5, 0.6],
+                itemLabel: (v) => '${(v * 100).round()}%',
+                onChanged: (v) => settings.setDuckVolume(v),
+              ),
+              _tileDivider(),
+              SwitchListTile(
+                value: settings.autoResumeAfterInterruption,
+                title: Text(AppStrings.autoResume(locale)),
+                subtitle: const Text('Resume playback after short focus loss'),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setAutoResumeAfterInterruption(v),
+              ),
+            ]),
+
+            _sectionHeader('General'),
+            _sectionCard([
+              _dropdownTile<String>(
+                context,
+                title: AppStrings.language(locale),
+                current: settings.localeCode,
+                items: const ['en', 'sw', 'am'],
+                itemLabel: (v) {
+                  switch (v) {
+                    case 'sw':
+                      return AppStrings.kiswahili(locale);
+                    case 'am':
+                      return AppStrings.amharic(locale);
+                    default:
+                      return AppStrings.english(locale);
+                  }
+                },
+                onChanged: (v) => settings.setLocaleCode(v),
+              ),
+              _tileDivider(),
+              ListTile(
+                title: Text(
+                  'Audio Engine',
+                  style: TextStyle(
+                    color: txtcolor,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-              ),
-              dropdownMenuTheme: DropdownMenuThemeData(
-                textStyle: TextStyle(color: txtcolor),
-                menuStyle: MenuStyle(
-                  backgroundColor: WidgetStatePropertyAll(cardcolor),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Choose the underlying audio decoder:',
+                      style: TextStyle(
+                        color: txtcolor.withAlpha(200),
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '• System: Uses native OS decoders (ExoPlayer on Android, AVPlayer on iOS/macOS). Best for battery life.',
+                      style: TextStyle(
+                        color: txtcolor.withAlpha(160),
+                        fontSize: 12,
+                      ),
+                    ),
+                    Text(
+                      '• MediaKit: Uses bundled MPV player. Better format support, consistent behavior across platforms. (Experimental on Android)',
+                      style: TextStyle(
+                        color: txtcolor.withAlpha(160),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Requires app restart to take effect.',
+                      style: TextStyle(
+                        color: Colors.orangeAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            child: ListView(
-              padding: const EdgeInsets.only(
-                bottom: 120,
-                left: 16,
-                right: 16,
-                top: 12,
-              ),
-              children: [
-                _sectionHeader(AppStrings.playback(settings.localeCode)),
-                _sectionCard([
-                  ListTile(
-                    leading: Icon(Icons.language, color: appbarcolor),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            AppStrings.language(settings.localeCode),
-                            style: TextStyle(color: txtcolor),
-                          ),
-                        ),
-                        DropdownButton<String>(
-                          value: settings.localeCode.split('-').first,
-                          dropdownColor: cardcolor,
-                          style: TextStyle(color: txtcolor),
-                          items: [
-                            DropdownMenuItem(
-                              value: 'en',
-                              child: Text(
-                                AppStrings.english(settings.localeCode),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isSystem = settings.audioBackend == 'system';
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: cardcolor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: cardcolor.withAlpha(100)),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () async {
+                                if (!isSystem) {
+                                  await settings.setAudioBackend('system');
+                                  if (context.mounted)
+                                    RestartWidget.restartApp(context);
+                                }
+                              },
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(12),
                               ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'sw',
-                              child: Text(
-                                AppStrings.kiswahili(settings.localeCode),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'am',
-                              child: Text(
-                                AppStrings.amharic(settings.localeCode),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            await settings.setLocaleCode(v);
-                          },
-                        ),
-                      ],
-                    ),
-                    subtitle: Text(
-                      settings.localeCode.startsWith('sw')
-                          ? AppStrings.kiswahili(settings.localeCode)
-                          : settings.localeCode.startsWith('am')
-                          ? AppStrings.amharic(settings.localeCode)
-                          : AppStrings.english(settings.localeCode),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                  ),
-                  _tileDivider(),
-                  SwitchListTile(
-                    title: Text(
-                      AppStrings.shuffleOnStart(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      AppStrings.enableShuffleByDefault(settings.localeCode),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    value: settings.defaultShuffle,
-                    onChanged: (v) async {
-                      await settings.setDefaultShuffle(v);
-                      await audio.setShuffleModeEnabled(v);
-                    },
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.repeat, color: appbarcolor),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            AppStrings.loopMode(settings.localeCode),
-                            style: TextStyle(color: txtcolor),
-                          ),
-                        ),
-                        DropdownButton<String>(
-                          value: settings.defaultLoopMode,
-                          dropdownColor: cardcolor,
-                          style: TextStyle(color: txtcolor),
-                          items: [
-                            DropdownMenuItem(
-                              value: 'off',
-                              child: Text(AppStrings.off(settings.localeCode)),
-                            ),
-                            DropdownMenuItem(
-                              value: 'one',
-                              child: Text(
-                                AppStrings.repeatOne(settings.localeCode),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'all',
-                              child: Text(
-                                AppStrings.repeatAll(settings.localeCode),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            await settings.setDefaultLoopMode(v);
-                            switch (v) {
-                              case 'one':
-                                await audio.setLoopMode(LoopMode.one);
-                                break;
-                              case 'all':
-                                await audio.setLoopMode(LoopMode.all);
-                                break;
-                              default:
-                                await audio.setLoopMode(LoopMode.off);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                    subtitle: Text(
-                      settings.defaultLoopMode,
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.speed, color: appbarcolor),
-                    title: Text(
-                      AppStrings.playbackSpeed(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${settings.defaultPlaybackSpeed.toStringAsFixed(2)}x',
-                          style: TextStyle(color: txtcolor.withAlpha(160)),
-                        ),
-                        Slider(
-                          value: settings.defaultPlaybackSpeed,
-                          min: 0.5,
-                          max: 2.0,
-                          divisions: 15,
-                          label: settings.defaultPlaybackSpeed.toStringAsFixed(
-                            2,
-                          ),
-                          onChanged: (v) async {
-                            await settings.setDefaultPlaybackSpeed(v);
-                            await audio.setSpeed(v);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.volume_up, color: appbarcolor),
-                    title: Text(
-                      AppStrings.defaultVolume(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${(settings.defaultVolume * 100).round()}%',
-                          style: TextStyle(color: txtcolor.withAlpha(160)),
-                        ),
-                        Slider(
-                          value: settings.defaultVolume,
-                          min: 0.0,
-                          max: 1.0,
-                          divisions: 20,
-                          label: '${(settings.defaultVolume * 100).round()}%',
-                          onChanged: (v) async {
-                            await settings.setDefaultVolume(v);
-                            await audio.setVolume(v);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.high_quality, color: appbarcolor),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            AppStrings.preferredAudioQuality(
-                              settings.localeCode,
-                            ),
-                            style: TextStyle(color: txtcolor),
-                          ),
-                        ),
-                        DropdownButton<String>(
-                          value: settings.preferredQuality,
-                          dropdownColor: cardcolor,
-                          style: TextStyle(color: txtcolor),
-                          items: [
-                            DropdownMenuItem(
-                              value: 'low',
-                              child: Text(
-                                AppStrings.lowQuality(settings.localeCode),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'medium',
-                              child: Text(
-                                AppStrings.mediumQuality(settings.localeCode),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'high',
-                              child: Text(
-                                AppStrings.highQuality(settings.localeCode),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            await settings.setPreferredQuality(v);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  AppStrings.willApplyToNewTracks(
-                                    settings.localeCode,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSystem ? appbarcolor : null,
+                                  borderRadius: const BorderRadius.horizontal(
+                                    left: Radius.circular(11),
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  'System',
+                                  style: TextStyle(
+                                    color: isSystem
+                                        ? Colors.white
+                                        : txtcolor.withAlpha(180),
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    subtitle: Text(
-                      settings.preferredQuality.toUpperCase(),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.waves_outlined, color: appbarcolor),
-                    title: Text(
-                      AppStrings.crossfadeComingSoon(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${settings.crossfadeSeconds}s',
-                          style: TextStyle(color: txtcolor.withAlpha(160)),
-                        ),
-                        Slider(
-                          value: settings.crossfadeSeconds.toDouble(),
-                          min: 0,
-                          max: 12,
-                          divisions: 12,
-                          label: '${settings.crossfadeSeconds}s',
-                          onChanged: (v) async {
-                            await settings.setCrossfadeSeconds(v.round());
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ]),
-
-                // Search section
-                _sectionHeader('Search'),
-                _sectionCard([
-                  SwitchListTile(
-                    title: Text(
-                      'Show recent searches',
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'Display your last queries as chips on the search screen',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    value: settings.showRecentSearches,
-                    onChanged: (v) async {
-                      await settings.setShowRecentSearches(v);
-                    },
-                  ),
-                  _tileDivider(),
-                  SwitchListTile(
-                    title: Text(
-                      'Show search suggestions',
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'Fetch and show suggestions while typing in search',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    value: settings.showSearchSuggestions,
-                    onChanged: (v) async {
-                      await settings.setShowSearchSuggestions(v);
-                      // UI will react in SearchOverlay; nothing else to do here
-                    },
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.history, color: appbarcolor),
-                    title: Text(
-                      'Clear recent searches',
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'Remove all stored search queries',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    onTap: () async {
-                      // Clear the SharedPreferences key used by SearchOverlay
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.remove('recent_searches');
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Recent searches cleared'),
+                            ),
                           ),
-                        );
-                      }
-                    },
-                  ),
-                ]),
-
-                _sectionHeader(AppStrings.audioFocus(settings.localeCode)),
-                _sectionCard([
-                  SwitchListTile(
-                    title: Text(
-                      AppStrings.duckOnInterruption(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      AppStrings.lowerVolumeOnInterruption(settings.localeCode),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    value: settings.duckOnInterruption,
-                    onChanged: (v) async {
-                      await settings.setDuckOnInterruption(v);
-                    },
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.volume_down_alt, color: appbarcolor),
-                    title: Text(
-                      AppStrings.duckVolume(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${(settings.duckVolume * 100).round()}%',
-                          style: TextStyle(color: txtcolor.withAlpha(160)),
-                        ),
-                        Slider(
-                          value: settings.duckVolume,
-                          min: 0.0,
-                          max: 1.0,
-                          divisions: 20,
-                          label: '${(settings.duckVolume * 100).round()}%',
-                          onChanged: settings.duckOnInterruption
-                              ? (v) async {
-                                  await settings.setDuckVolume(v);
+                          Container(width: 1, height: 40, color: bgcolor),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () async {
+                                if (isSystem) {
+                                  await settings.setAudioBackend('mediakit');
+                                  if (context.mounted)
+                                    RestartWidget.restartApp(context);
                                 }
-                              : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  _tileDivider(),
-                  SwitchListTile(
-                    title: Text(
-                      AppStrings.autoResume(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    value: settings.autoResumeAfterInterruption,
-                    onChanged: (v) async {
-                      await settings.setAutoResumeAfterInterruption(v);
-                    },
-                  ),
-                ]),
-
-                _sectionHeader(AppStrings.maintenance(settings.localeCode)),
-                _sectionCard([
-                  ListTile(
-                    leading: Icon(
-                      Icons.cleaning_services_outlined,
-                      color: appbarcolor,
-                    ),
-                    title: Text(
-                      AppStrings.clearStreamImageCache(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      AppStrings.fixesBadUrlsAndFreesMemory(
-                        settings.localeCode,
-                      ),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    trailing: _primaryChip(
-                      AppStrings.clear(settings.localeCode),
-                    ),
-                    onTap: () {
-                      AudioPlayerService().clearCache();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            AppStrings.cacheCleared(settings.localeCode),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.refresh_outlined, color: appbarcolor),
-                    title: Text(
-                      AppStrings.resetAllSettings(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    trailing: _primaryChip(
-                      AppStrings.reset(settings.localeCode),
-                    ),
-                    onTap: () async {
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          backgroundColor: cardcolor,
-                          title: Text(
-                            AppStrings.resetSettingsQ(settings.localeCode),
-                            style: TextStyle(color: txtcolor),
-                          ),
-                          content: Text(
-                            AppStrings.resetSettingsDesc(settings.localeCode),
-                            style: TextStyle(color: txtcolor.withAlpha(180)),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: Text(AppStrings.off(settings.localeCode)),
-                            ),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: appbarcolor,
-                                foregroundColor: Colors.white,
+                              },
+                              borderRadius: const BorderRadius.horizontal(
+                                right: Radius.circular(12),
                               ),
-                              onPressed: () => Navigator.pop(context, true),
-                              child: Text(
-                                AppStrings.reset(settings.localeCode),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: !isSystem ? appbarcolor : null,
+                                  borderRadius: const BorderRadius.horizontal(
+                                    right: Radius.circular(11),
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  'MediaKit',
+                                  style: TextStyle(
+                                    color: !isSystem
+                                        ? Colors.white
+                                        : txtcolor.withAlpha(180),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (ok == true) {
-                        await settings.resetToDefaults();
-                        try {
-                          await audio.setSpeed(settings.defaultPlaybackSpeed);
-                        } catch (_) {}
-                        try {
-                          await audio.setVolume(settings.defaultVolume);
-                        } catch (_) {}
-                        await audio.setShuffleModeEnabled(
-                          settings.defaultShuffle,
-                        );
-                        switch (settings.defaultLoopMode) {
-                          case 'one':
-                            await audio.setLoopMode(LoopMode.one);
-                            break;
-                          case 'all':
-                            await audio.setLoopMode(LoopMode.all);
-                            break;
-                          default:
-                            await audio.setLoopMode(LoopMode.off);
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              AppStrings.settingsReset(settings.localeCode),
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ]),
-
-                _sectionHeader(AppStrings.about(settings.localeCode)),
-                _sectionCard([
-                  ListTile(
-                    leading: Icon(Icons.info_outline, color: appbarcolor),
-                    title: Text(
-                      AppStrings.appInfo(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'Sautify v0.0.2',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    onTap: () {
-                      showAboutDialog(
-                        context: context,
-                        applicationName: AppStrings.appTitle(
-                          settings.localeCode,
-                        ),
-                        applicationVersion: '0.0.2',
-                        applicationIcon: const Icon(Icons.library_music),
-                        barrierColor: bgcolor.withAlpha(200),
-                        children: const [
-                          Text(
-                            'A modern music streaming player backed  by youtube music client and online sources.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'roboto',
                             ),
                           ),
                         ],
-                      );
-                    },
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(
-                      Icons.privacy_tip_outlined,
-                      color: appbarcolor,
-                    ),
-                    title: Text(
-                      AppStrings.privacyAndPermissions(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      AppStrings.notificationsStorageNetwork(
-                        settings.localeCode,
                       ),
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    onTap: () {},
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.article_outlined, color: appbarcolor),
-                    title: Text(
-                      AppStrings.openSourceLicenses(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    onTap: () {
-                      showLicensePage(
-                        context: context,
-                        applicationName: AppStrings.appTitle(
-                          settings.localeCode,
-                        ),
-                        applicationVersion: '0.0.2',
-                      );
-                    },
-                  ),
-                ]),
-
-                _sectionHeader(
-                  AppStrings.developerSection(settings.localeCode),
+                    );
+                  },
                 ),
-                _sectionCard([
-                  ListTile(
-                    leading: Icon(Icons.person_outline, color: appbarcolor),
-                    title: Text(
-                      AppStrings.developedBy(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'Wambugu Kinyua',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                  ),
-                  _tileDivider(),
-                  ListTile(
-                    leading: Icon(Icons.email_outlined, color: appbarcolor),
-                    title: Text(
-                      AppStrings.contactDeveloper(settings.localeCode),
-                      style: TextStyle(color: txtcolor),
-                    ),
-                    subtitle: Text(
-                      'wambugukinyua125@gmail.com',
-                      style: TextStyle(color: txtcolor.withAlpha(160)),
-                    ),
-                    trailing: _primaryChip(
-                      AppStrings.copy(settings.localeCode),
-                    ),
-                    onTap: () async {
-                      await Clipboard.setData(
-                        const ClipboardData(text: 'wambugukinyua125@gmail.com'),
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            AppStrings.copiedToClipboard(settings.localeCode),
-                          ),
+              ),
+            ]),
+
+            _sectionHeader('Search'),
+            _sectionCard([
+              SwitchListTile(
+                value: settings.showRecentSearches,
+                title: const Text('Show recent searches'),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setShowRecentSearches(v),
+              ),
+              _tileDivider(),
+              SwitchListTile(
+                value: settings.showSearchSuggestions,
+                title: const Text('Show search suggestions'),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setShowSearchSuggestions(v),
+              ),
+            ]),
+
+            _sectionHeader('Downloads'),
+            _sectionCard([
+              ListTile(
+                title: const Text('Download Location'),
+                subtitle: Text(settings.downloadPath),
+                trailing: Icon(Icons.edit, color: appbarcolor),
+                onTap: () => _showPathEditor(context, settings),
+              ),
+            ]),
+
+            _sectionHeader(AppStrings.maintenance(locale)),
+            _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_outlined),
+                title: Text(AppStrings.clearStreamImageCache(locale)),
+                subtitle: Text(AppStrings.fixesBadUrlsAndFreesMemory(locale)),
+                onTap: () {
+                  // Implement actual cache clearing service call later
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.cacheCleared(locale))),
+                  );
+                },
+              ),
+              _tileDivider(),
+              ListTile(
+                leading: const Icon(Icons.restore_outlined),
+                title: Text(AppStrings.resetAllSettings(locale)),
+                subtitle: Text(AppStrings.resetSettingsDesc(locale)),
+                onTap: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: Text(AppStrings.resetSettingsQ(locale)),
+                      content: Text(AppStrings.resetSettingsDesc(locale)),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel'),
                         ),
-                      );
-                    },
-                  ),
-                ]),
-                const SizedBox(height: 80),
-              ],
-            ),
-          ),
-        );
-      },
+                        FilledButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: Text(AppStrings.reset(locale)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    await settings.resetToDefaults();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(AppStrings.settingsReset(locale))),
+                    );
+                  }
+                },
+              ),
+            ]),
+
+            _sectionHeader('Updates'),
+            _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.system_update_alt_outlined),
+                title: const Text('Check for update'),
+                subtitle: const Text('Tap to query latest GitHub release'),
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Checking for updates...')),
+                  );
+                  final info = await UpdateService.instance.checkForUpdate();
+                  messenger.hideCurrentSnackBar();
+                  if (!info.hasUpdate) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'No updates. Current v${info.currentVersion}.',
+                        ),
+                      ),
+                    );
+                  } else {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Update available: v${info.latestVersion}',
+                        ),
+                        action: info.htmlUrl == null
+                            ? null
+                            : SnackBarAction(
+                                label: 'Open',
+                                onPressed: () async {
+                                  final uri = Uri.parse(info.htmlUrl!);
+                                  if (await canLaunchUrl(uri)) {
+                                    await launchUrl(
+                                      uri,
+                                      mode: LaunchMode.externalApplication,
+                                    );
+                                  }
+                                },
+                              ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ]),
+
+            _sectionHeader(AppStrings.about(locale)),
+            _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: Text(AppStrings.appInfo(locale)),
+                subtitle: Text('Version ${AppStrings.appTitle(locale)}'),
+                onTap: () {
+                  showAboutDialog(
+                    context: context,
+                    applicationName: AppStrings.appTitle(locale),
+                    applicationVersion: 'v0.0.3',
+                    applicationIcon: const Icon(Icons.library_music),
+                    children: const [
+                      Text(
+                        'A modern music player using YouTube Music & online sources. Open source.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              _tileDivider(),
+              ListTile(
+                leading: const Icon(Icons.article_outlined),
+                title: Text(AppStrings.openSourceLicenses(locale)),
+                onTap: () => showLicensePage(
+                  context: context,
+                  applicationName: AppStrings.appTitle(locale),
+                  applicationVersion: 'v0.0.3',
+                ),
+              ),
+            ]),
+
+            _sectionHeader(AppStrings.developerSection(locale)),
+            _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: Text(AppStrings.developedBy(locale)),
+                subtitle: const Text('Wambugu Kinyua'),
+              ),
+              _tileDivider(),
+              ListTile(
+                leading: const Icon(Icons.email_outlined),
+                title: Text(AppStrings.contactDeveloper(locale)),
+                subtitle: const Text('wambugukinyua125@gmail.com'),
+                trailing: const Icon(Icons.copy_all_outlined),
+                onTap: () async {
+                  // Copy email to clipboard
+                  final data = const ClipboardData(
+                    text: 'wambugukinyua125@gmail.com',
+                  );
+                  await Clipboard.setData(data);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: const Text('Copied to clipboard')),
+                  );
+                },
+              ),
+            ]),
+            const SizedBox(height: 60),
+          ],
+        ),
+      ),
     );
   }
 
+  // Helpers
   Widget _sectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 16, 8, 10),
+      padding: const EdgeInsets.fromLTRB(8, 18, 8, 10),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-          color: txtcolor,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: txtcolor.withAlpha(210),
+          letterSpacing: 0.4,
         ),
       ),
     );
@@ -718,31 +536,88 @@ class SettingsScreen extends StatelessWidget {
     return Card(
       color: cardcolor,
       elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(children: children),
-      ),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Column(children: children),
     );
   }
 
   Widget _tileDivider() =>
-      Divider(height: 1, color: Colors.white.withAlpha(20));
+      Divider(height: 1, thickness: 0.6, color: txtcolor.withAlpha(30));
 
-  Widget _primaryChip(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: appbarcolor,
-        borderRadius: BorderRadius.circular(8),
+  Widget _dropdownTile<T>(
+    BuildContext context, {
+    required String title,
+    String? subtitle,
+    required T current,
+    required List<T> items,
+    required String Function(T) itemLabel,
+    required ValueChanged<T> onChanged,
+  }) {
+    return ListTile(
+      title: Text(
+        title,
+        style: TextStyle(color: txtcolor, fontWeight: FontWeight.w500),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle,
+              style: TextStyle(color: txtcolor.withAlpha(160), fontSize: 12),
+            ),
+      trailing: DropdownButton<T>(
+        value: current,
+        dropdownColor: cardcolor,
+        style: TextStyle(color: txtcolor),
+        iconEnabledColor: appbarcolor,
+        underline: const SizedBox.shrink(),
+        onChanged: (v) => v == null ? null : onChanged(v),
+        items: items
+            .map(
+              (e) => DropdownMenuItem<T>(
+                value: e,
+                child: Text(itemLabel(e), style: TextStyle(color: txtcolor)),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  void _showPathEditor(BuildContext context, SettingsService settings) {
+    final controller = TextEditingController(text: settings.downloadPath);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: cardcolor,
+        title: Text('Download Location', style: TextStyle(color: txtcolor)),
+        content: TextField(
+          controller: controller,
+          style: TextStyle(color: txtcolor),
+          decoration: InputDecoration(
+            labelText: 'Path',
+            labelStyle: TextStyle(color: txtcolor.withAlpha(150)),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: txtcolor.withAlpha(100)),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: appbarcolor),
+            ),
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: txtcolor)),
+          ),
+          TextButton(
+            onPressed: () {
+              settings.setDownloadPath(controller.text);
+              Navigator.pop(context);
+            },
+            child: Text('Save', style: TextStyle(color: appbarcolor)),
+          ),
+        ],
       ),
     );
   }

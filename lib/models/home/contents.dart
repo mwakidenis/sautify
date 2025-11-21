@@ -31,8 +31,12 @@ class Contents {
     // Try to resolve a videoId if present on this content type
     String? vid;
     try {
-      // Common shapes seen in dart_ytmusic_api results
-      vid = content.videoId ?? content.id?.value ?? content.id ?? null;
+      if (content.runtimeType.toString() == 'PlaylistDetailed') {
+        vid = null;
+      } else {
+        // Common shapes seen in dart_ytmusic_api results
+        vid = content.videoId ?? content.id?.value ?? content.id ?? null;
+      }
     } catch (_) {
       vid = null;
     }
