@@ -680,6 +680,20 @@ class AudioPlayerService extends ChangeNotifier {
       }
       return false;
     }
+
+    // OPTIMIZATION: Start fetching the first track immediately, before stopping the player.
+    // This parallelizes the network request with the player teardown.
+    Future<StreamingData?>? firstTrackFuture;
+    if (cappedInitialIndex >= 0 && cappedInitialIndex < cappedTracks.length) {
+      final t = cappedTracks[cappedInitialIndex];
+      if (!t.isReady || t.streamUrl == null) {
+        firstTrackFuture = _streamingService.fetchStreamingData(
+          t.videoId,
+          _getPreferredQuality(),
+        );
+      }
+    }
+
     // If we are actually replacing with a different queue and caller requests
     // a smooth transition, stop first so old audio stops immediately.
     if (withTransition) {
@@ -767,7 +781,24 @@ class AudioPlayerService extends ChangeNotifier {
         }
 
         // 1. Resolve CURRENT track immediately and play
-        await resolveIndex(_currentIndex);
+        if (firstTrackFuture != null) {
+          final r = await firstTrackFuture;
+          if (r != null && _currentIndex < _playlist.length) {
+            final old = _playlist[_currentIndex];
+            _playlist[_currentIndex] = old.copyWith(
+              streamUrl: r.streamUrl,
+              quality: r.quality,
+              cachedAt: r.cachedAt,
+              isAvailable: true,
+              title: old.title.isNotEmpty ? old.title : r.title,
+              artist: old.artist.isNotEmpty ? old.artist : r.artist,
+              duration: old.duration ?? r.duration,
+              thumbnailUrl: r.thumbnailUrl ?? old.thumbnailUrl,
+            );
+          }
+        } else {
+          await resolveIndex(_currentIndex);
+        }
 
         if (requestId != _loadRequestId) return false;
 

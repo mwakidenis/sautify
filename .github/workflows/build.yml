@@ -51,9 +51,10 @@ jobs:
 
       - name: "Generate  Splash screen"
         run: dart run flutter_native_splash:create
-
+      - name: "Upgrade packages"
+        run: flutter pub upgrade
       - name: 🏗️ Build APKs
-        run: flutter build apk --release --split-per-abi -v
+        run: flutter build apk --release --split-per-abi --no-pub -v
 
       - name: 📦 Prepare artifacts
         run: |
