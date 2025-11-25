@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/settings_service.dart';
@@ -88,7 +89,13 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: LoadingIndicatorM3E(
+                containerColor: appbarcolor.withAlpha(100),
+                variant: LoadingIndicatorM3EVariant.contained,
+                color: appbarcolor,
+              ),
+            )
           : _settings.audioBackend == 'mediakit'
           ? const Center(
               child: Padding(

@@ -22,7 +22,6 @@ import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/app_localizations.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/widgets/mini_player.dart';
-import 'package:toastification/toastification.dart';
 
 // Legacy lightweight i18n helper is still used in other screens; not needed here
 // import 'l10n/strings.dart';
@@ -49,6 +48,7 @@ Future<void> _requestNotificationPermissionIfNeeded() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   HttpOverrides.global = MyHttpOverrides();
 
   // Workaround: Suppress noisy debug-only MouseTracker assertion during warm-up frames/hot reload
@@ -99,11 +99,15 @@ void main() async {
     // Note: On Android, this uses a bundled MPV build which increases APK size
     // and might behave differently than ExoPlayer.
     JustAudioMediaKit.ensureInitialized(
-      windows: true,
-      android: true, // Enable on Android if selected
-      linux: true,
-      macOS: true,
+      windows:
+          false, // default: true  - dependency: media_kit_libs_windows_audio
+      linux: false, // default: true  - dependency: media_kit_libs_linux_audio
+      android: true,
     );
+    JustAudioMediaKit.prefetchPlaylist = true;
+    JustAudioMediaKit.pitch = true;
+    JustAudioMediaKit.pitch = true;
+    //JustAudioMediaKit.mpvLogLevel = MPVLogLevel.debug;
   }
 
   // Initialize the AudioPlayerService singleton
@@ -146,47 +150,41 @@ class MainApp extends StatefulWidget {
 class _MainAppState extends State<MainApp> {
   int _tab = 0;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   void _safeToast({
-    required Widget title,
-    Widget? description,
-    ToastificationType type = ToastificationType.info,
-    ToastificationStyle style = ToastificationStyle.fillColored,
-    Duration autoClose = const Duration(seconds: 3),
-    Alignment alignment = Alignment.topCenter,
-    Color? primaryColor,
+    required String title,
+    String? description,
     Color? backgroundColor,
+    Color? textColor,
   }) {
     if (!mounted) return;
-    // If Directionality not yet in tree (early lifecycle), defer until next frame.
-    if (Directionality.maybeOf(context) == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (Directionality.maybeOf(context) == null) return; // still unsafe
-        toastification.show(
-          context: context,
-          title: title,
-          description: description,
-          type: type,
-          style: style,
-          autoCloseDuration: autoClose,
-          alignment: alignment,
-          primaryColor: primaryColor,
-          backgroundColor: backgroundColor,
-        );
-      });
-      return;
-    }
-    toastification.show(
-      context: context,
-      title: title,
-      description: description,
-      type: type,
-      style: style,
-      autoCloseDuration: autoClose,
-      alignment: alignment,
-      primaryColor: primaryColor,
-      backgroundColor: backgroundColor,
+
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: textColor ?? Colors.white,
+              ),
+            ),
+            if (description != null)
+              Text(
+                description,
+                style: TextStyle(color: textColor ?? Colors.white),
+              ),
+          ],
+        ),
+        backgroundColor: backgroundColor ?? Colors.black87,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -206,16 +204,9 @@ class _MainAppState extends State<MainApp> {
           results.isEmpty || results.every((c) => c == ConnectivityResult.none);
       if (isOffline && mounted) {
         _safeToast(
-          title: const Text('You are offline'),
-          description: const Text(
-            'Some features may not work without internet',
-          ),
-          type: ToastificationType.warning,
-          style: ToastificationStyle.fillColored,
-          autoClose: const Duration(seconds: 4),
-          alignment: Alignment.topCenter,
-          primaryColor: Colors.orange,
-          backgroundColor: Colors.black87,
+          title: 'You are offline',
+          description: 'Some features may not work without internet',
+          backgroundColor: Colors.orange,
         );
       }
     } on MissingPluginException catch (_) {
@@ -238,14 +229,9 @@ class _MainAppState extends State<MainApp> {
             results.every((c) => c == ConnectivityResult.none);
         if (offline) {
           _safeToast(
-            title: const Text('No internet connection'),
-            description: const Text('You are offline'),
-            type: ToastificationType.error,
-            style: ToastificationStyle.fillColored,
-            autoClose: const Duration(seconds: 3),
-            alignment: Alignment.topCenter,
-            primaryColor: Colors.redAccent,
-            backgroundColor: Colors.black87,
+            title: 'No internet connection',
+            description: 'You are offline',
+            backgroundColor: Colors.redAccent,
           );
         }
       });
@@ -283,63 +269,63 @@ class _MainAppState extends State<MainApp> {
         // Use the already-initialized singleton and prevent Provider from disposing it
         ChangeNotifierProvider<SettingsService>.value(value: SettingsService()),
       ],
-      child: ToastificationWrapper(
-        child: Consumer<SettingsService>(
-          builder: (context, settings, _) {
-            return MaterialApp(
-              debugShowCheckedModeBanner: false,
-              onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
-              theme: ThemeData(
-                primaryColorDark: bgcolor,
-                useMaterial3: true,
-                snackBarTheme: SnackBarThemeData(
-                  backgroundColor: appbarcolor,
-                  elevation: 8.0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16.0),
-                  ),
-                  behavior: SnackBarBehavior.floating,
-                  contentTextStyle: TextStyle(
-                    color: txtcolor,
-                    fontWeight: FontWeight.bold,
-                  ),
+      child: Consumer<SettingsService>(
+        builder: (context, settings, _) {
+          return MaterialApp(
+            scaffoldMessengerKey: _scaffoldMessengerKey,
+            debugShowCheckedModeBanner: false,
+            onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
+            theme: ThemeData(
+              primaryColorDark: bgcolor,
+              useMaterial3: true,
+              snackBarTheme: SnackBarThemeData(
+                backgroundColor: appbarcolor,
+                elevation: 8.0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16.0),
+                ),
+                behavior: SnackBarBehavior.floating,
+                contentTextStyle: TextStyle(
+                  color: txtcolor,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              locale: _toLocale(settings.localeCode),
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              supportedLocales: AppLocalizations.supportedLocales,
-              home: Builder(
-                builder: (innerCtx) {
-                  final l10n = AppLocalizations.of(innerCtx);
-                  return Scaffold(
-                    backgroundColor: bgcolor,
-                    bottomNavigationBar: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Global Mini Player always shown above the bottom nav bar
-                        const MiniPlayer(),
-                        // Disable ripple/highlight specifically for the bottom nav bar
-                        Theme(
-                          data: Theme.of(context).copyWith(
-                            splashFactory: NoSplash.splashFactory,
-                            splashColor: Colors.transparent,
-                            highlightColor: Colors.transparent,
-                            hoverColor: Colors.transparent,
-                          ),
-                          child: NavigationBarM3E(
-                            padding: EdgeInsets.all(8.0),
-                            labelBehavior: NavBarM3ELabelBehavior.alwaysShow,
-                            indicatorStyle: NavBarM3EIndicatorStyle.pill,
-                            size: NavBarM3ESize.small,
-                            shapeFamily: NavBarM3EShapeFamily.square,
-                            indicatorColor: appbarcolor.withAlpha(100),
-                            backgroundColor: bgcolor,
+            ),
+            locale: _toLocale(settings.localeCode),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Builder(
+              builder: (innerCtx) {
+                final l10n = AppLocalizations.of(innerCtx);
+                return Scaffold(
+                  backgroundColor: bgcolor,
+                  bottomNavigationBar: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Global Mini Player always shown above the bottom nav bar
+                      const MiniPlayer(),
+                      // Disable ripple/highlight specifically for the bottom nav bar
+                      Theme(
+                        data: Theme.of(context).copyWith(
+                          splashFactory: NoSplash.splashFactory,
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
+                          hoverColor: Colors.transparent,
+                        ),
+                        child: NavigationBarM3E(
+                          padding: EdgeInsets.all(8.0),
+                          labelBehavior: NavBarM3ELabelBehavior.alwaysShow,
+                          indicatorStyle: NavBarM3EIndicatorStyle.pill,
+                          size: NavBarM3ESize.small,
+                          shapeFamily: NavBarM3EShapeFamily.square,
+                          indicatorColor: appbarcolor.withAlpha(100),
+                          backgroundColor: bgcolor,
 
-                            selectedIndex: _tab,
-                            onDestinationSelected: (i) =>
-                                setState(() => _tab = i),
+                          selectedIndex: _tab,
+                          onDestinationSelected: (i) =>
+                              setState(() => _tab = i),
 
-                            /*
+                          /*
                             type: BottomNavigationBarType.fixed,
                             currentIndex: _tab,
                             onTap: (i) => setState(() => _tab = i),
@@ -357,52 +343,48 @@ class _MainAppState extends State<MainApp> {
                             unselectedLabelStyle: TextStyle(
                               color: iconcolor.withValues(alpha: 100),
                             ),*/
-                            destinations: [
-                              NavigationDestinationM3E(
-                                icon: Icon(
-                                  Icons.home_rounded,
-                                  color: iconcolor,
-                                ),
-                                selectedIcon: Icon(
-                                  Icons.home,
-                                  color: appbarcolor,
-                                ),
-                                label: l10n.homeTitle,
+                          destinations: [
+                            NavigationDestinationM3E(
+                              icon: Icon(Icons.home_rounded, color: iconcolor),
+                              selectedIcon: Icon(
+                                Icons.home,
+                                color: appbarcolor,
                               ),
-                              NavigationDestinationM3E(
-                                icon: Icon(
-                                  Icons.library_music_rounded,
-                                  color: iconcolor,
-                                ),
-                                selectedIcon: Icon(
-                                  Icons.library_music,
-                                  color: appbarcolor,
-                                ),
-                                label: l10n.libraryTitle,
+                              label: l10n.homeTitle,
+                            ),
+                            NavigationDestinationM3E(
+                              icon: Icon(
+                                Icons.library_music_rounded,
+                                color: iconcolor,
                               ),
-                              NavigationDestinationM3E(
-                                icon: Icon(
-                                  Icons.settings_rounded,
-                                  color: iconcolor,
-                                ),
-                                selectedIcon: Icon(
-                                  Icons.settings,
-                                  color: appbarcolor,
-                                ),
-                                label: l10n.settingsTitle,
+                              selectedIcon: Icon(
+                                Icons.library_music,
+                                color: appbarcolor,
                               ),
-                            ],
-                          ),
+                              label: l10n.libraryTitle,
+                            ),
+                            NavigationDestinationM3E(
+                              icon: Icon(
+                                Icons.settings_rounded,
+                                color: iconcolor,
+                              ),
+                              selectedIcon: Icon(
+                                Icons.settings,
+                                color: appbarcolor,
+                              ),
+                              label: l10n.settingsTitle,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    body: IndexedStack(index: _tab, children: pages),
-                  );
-                },
-              ),
-            );
-          },
-        ),
+                      ),
+                    ],
+                  ),
+                  body: IndexedStack(index: _tab, children: pages),
+                );
+              },
+            ),
+          );
+        },
       ),
     );
   }

@@ -782,7 +782,13 @@ class AudioPlayerService extends ChangeNotifier {
 
         // 1. Resolve CURRENT track immediately and play
         if (firstTrackFuture != null) {
-          final r = await firstTrackFuture;
+          StreamingData? r;
+          try {
+            r = await firstTrackFuture;
+          } catch (_) {
+            // Ignore error from prefetch, fallback to standard resolve
+          }
+
           if (r != null && _currentIndex < _playlist.length) {
             final old = _playlist[_currentIndex];
             _playlist[_currentIndex] = old.copyWith(
@@ -795,6 +801,9 @@ class AudioPlayerService extends ChangeNotifier {
               duration: old.duration ?? r.duration,
               thumbnailUrl: r.thumbnailUrl ?? old.thumbnailUrl,
             );
+          } else {
+            // Fallback if prefetch failed or returned null
+            await resolveIndex(_currentIndex);
           }
         } else {
           await resolveIndex(_currentIndex);
@@ -989,6 +998,7 @@ class AudioPlayerService extends ChangeNotifier {
       children.add(
         AudioSource.uri(
           _toPlayableUri(t.streamUrl!, isLocal: t.isLocal),
+          headers: _headers,
           tag: MediaItem(
             id: t.videoId,
             title: t.title,
@@ -1014,14 +1024,18 @@ class AudioPlayerService extends ChangeNotifier {
     final bool wasShuffled = _player.shuffleModeEnabled;
     if (wasShuffled) await _player.setShuffleModeEnabled(false);
     try {
-      await _player.setAudioSources(
-        children,
+      await _player.setAudioSource(
+        ConcatenatingAudioSource(
+          children: children,
+          useLazyPreparation: true,
+          shuffleOrder: DefaultShuffleOrder(),
+        ),
         initialIndex: initChildIndex,
         initialPosition: Duration.zero,
       );
     } on UnimplementedError catch (e, st) {
       if (kDebugMode) {
-        debugPrint('setAudioSources unsupported on current backend: $e\n$st');
+        debugPrint('setAudioSource unsupported on current backend: $e\n$st');
       }
       // Auto fallback: switch backend to system & notify user via debug log.
       final settings = SettingsService();
@@ -1029,8 +1043,12 @@ class AudioPlayerService extends ChangeNotifier {
         await settings.setAudioBackend('system');
         // Retry once with system backend (player instance remains valid)
         try {
-          await _player.setAudioSources(
-            children,
+          await _player.setAudioSource(
+            ConcatenatingAudioSource(
+              children: children,
+              useLazyPreparation: true,
+              shuffleOrder: DefaultShuffleOrder(),
+            ),
             initialIndex: initChildIndex,
             initialPosition: Duration.zero,
           );
@@ -1278,10 +1296,12 @@ class AudioPlayerService extends ChangeNotifier {
     int childIndex = sequenceIndex;
     if (_player.shuffleModeEnabled) {
       final shuffle = _player.shuffleIndices;
-      if (sequenceIndex >= shuffle.length) {
-        return _currentIndex;
+      if (shuffle != null) {
+        if (sequenceIndex >= shuffle.length) {
+          return _currentIndex;
+        }
+        childIndex = shuffle[sequenceIndex];
       }
-      childIndex = shuffle[sequenceIndex];
     }
     if (childIndex < 0 || childIndex >= _childToPlaylistIndex.length) {
       return _currentIndex;
@@ -1311,6 +1331,7 @@ class AudioPlayerService extends ChangeNotifier {
   int _childIndexToSequenceIndex(int childIndex) {
     if (!_player.shuffleModeEnabled) return childIndex;
     final shuffle = _player.shuffleIndices;
+    if (shuffle == null) return childIndex;
     final seqIndex = shuffle.indexOf(childIndex);
     return seqIndex >= 0 ? seqIndex : childIndex;
   }
@@ -1588,21 +1609,37 @@ class AudioPlayerService extends ChangeNotifier {
           final t = _playlist[i];
           if (t.isReady && t.streamUrl != null) {
             final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
-            children.add(
-              AudioSource.uri(
-                uri,
-                tag: MediaItem(
-                  id: t.videoId,
-                  title: t.title,
-                  artist: t.artist,
-                  duration: t.duration,
-                  artUri: t.thumbnailUrl != null
-                      ? Uri.tryParse(t.thumbnailUrl!)
-                      : null,
-                  extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
-                ),
-              ),
+            final tag = MediaItem(
+              id: t.videoId,
+              title: t.title,
+              artist: t.artist,
+              duration: t.duration,
+              artUri: t.thumbnailUrl != null
+                  ? Uri.tryParse(t.thumbnailUrl!)
+                  : null,
+              extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
             );
+
+            // Use LockCachingAudioSource for remote streams if not using MediaKit
+            // MediaKit backend might not support the proxy URL, so we skip cache for it.
+            final settings = SettingsService();
+            final useCache =
+                !t.isLocal &&
+                settings.audioBackend != 'mediakit' &&
+                uri.scheme.startsWith('http');
+
+            if (useCache) {
+              children.add(
+                LockCachingAudioSource(
+                  uri,
+                  tag: tag,
+                  headers: _headers,
+                  // cacheKey: t.videoId, // Not supported in this version of just_audio_cache?
+                ),
+              );
+            } else {
+              children.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+            }
             readyIndices.add(i);
           }
         }
@@ -1617,21 +1654,35 @@ class AudioPlayerService extends ChangeNotifier {
         final t = _playlist[i];
         if (t.isReady && t.streamUrl != null) {
           final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
-          children.add(
-            AudioSource.uri(
-              uri,
-              tag: MediaItem(
-                id: t.videoId,
-                title: t.title,
-                artist: t.artist,
-                duration: t.duration,
-                artUri: t.thumbnailUrl != null
-                    ? Uri.tryParse(t.thumbnailUrl!)
-                    : null,
-                extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
-              ),
-            ),
+          final tag = MediaItem(
+            id: t.videoId,
+            title: t.title,
+            artist: t.artist,
+            duration: t.duration,
+            artUri: t.thumbnailUrl != null
+                ? Uri.tryParse(t.thumbnailUrl!)
+                : null,
+            extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
           );
+
+          final settings = SettingsService();
+          final useCache =
+              !t.isLocal &&
+              settings.audioBackend != 'mediakit' &&
+              uri.scheme.startsWith('http');
+
+          if (useCache) {
+            children.add(
+              LockCachingAudioSource(
+                uri,
+                tag: tag,
+                headers: _headers,
+                // cacheKey: t.videoId,
+              ),
+            );
+          } else {
+            children.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+          }
           readyIndices.add(i);
         }
       }
@@ -1702,8 +1753,12 @@ class AudioPlayerService extends ChangeNotifier {
     }
 
     try {
-      await _player.setAudioSources(
-        children,
+      await _player.setAudioSource(
+        ConcatenatingAudioSource(
+          children: children,
+          useLazyPreparation: true,
+          shuffleOrder: DefaultShuffleOrder(),
+        ),
         initialIndex: newChildIndex.clamp(0, children.length - 1),
         initialPosition: keepPosition ? prevPosition : Duration.zero,
       );
@@ -1718,8 +1773,12 @@ class AudioPlayerService extends ChangeNotifier {
         await settings.setAudioBackend('system');
         // Retry once with system backend
         try {
-          await _player.setAudioSources(
-            children,
+          await _player.setAudioSource(
+            ConcatenatingAudioSource(
+              children: children,
+              useLazyPreparation: true,
+              shuffleOrder: DefaultShuffleOrder(),
+            ),
             initialIndex: newChildIndex.clamp(0, children.length - 1),
             initialPosition: keepPosition ? prevPosition : Duration.zero,
           );
@@ -1762,6 +1821,7 @@ class AudioPlayerService extends ChangeNotifier {
             retryChildren.add(
               AudioSource.uri(
                 _toPlayableUri(t.streamUrl!, isLocal: t.isLocal),
+                headers: _headers,
                 tag: MediaItem(
                   id: t.videoId,
                   title: t.title,
@@ -1780,8 +1840,12 @@ class AudioPlayerService extends ChangeNotifier {
 
         if (retryChildren.isNotEmpty) {
           _childToPlaylistIndex = List<int>.from(retryReadyIndices);
-          await _player.setAudioSources(
-            retryChildren,
+          await _player.setAudioSource(
+            ConcatenatingAudioSource(
+              children: retryChildren,
+              useLazyPreparation: true,
+              shuffleOrder: DefaultShuffleOrder(),
+            ),
             initialIndex: _getAudioSourceIndex(
               _currentIndex,
             ).clamp(0, retryChildren.length - 1),
@@ -1856,31 +1920,48 @@ class AudioPlayerService extends ChangeNotifier {
     final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
     _setMinimalChildMapping(playlistIndex);
     try {
-      // Use setAudioSources (plural) to create a ConcatenatingAudioSource with 1 item
+      // Use setAudioSource to create a ConcatenatingAudioSource with 1 item
       // This allows future updates to potentially append to it seamlessly.
-      await _player.setAudioSources(
-        [
-          AudioSource.uri(
-            uri,
-            tag: MediaItem(
-              id: t.videoId,
-              title: t.title,
-              artist: t.artist,
-              duration: t.duration,
-              artUri: t.thumbnailUrl != null
-                  ? Uri.tryParse(t.thumbnailUrl!)
-                  : null,
-              extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
-            ),
-          ),
-        ],
+      final tag = MediaItem(
+        id: t.videoId,
+        title: t.title,
+        artist: t.artist,
+        duration: t.duration,
+        artUri: t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
+        extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
+      );
+
+      final settings = SettingsService();
+      final useCache =
+          !t.isLocal &&
+          settings.audioBackend != 'mediakit' &&
+          uri.scheme.startsWith('http');
+
+      AudioSource source;
+      if (useCache) {
+        source = LockCachingAudioSource(
+          uri,
+          tag: tag,
+          headers: _headers,
+          // cacheKey: t.videoId,
+        );
+      } else {
+        source = AudioSource.uri(uri, tag: tag, headers: _headers);
+      }
+
+      await _player.setAudioSource(
+        ConcatenatingAudioSource(
+          children: [source],
+          useLazyPreparation: true,
+          shuffleOrder: DefaultShuffleOrder(),
+        ),
         initialIndex: 0,
         initialPosition: Duration.zero,
       );
     } on UnimplementedError catch (e, st) {
       if (kDebugMode) {
         debugPrint(
-          'setAudioSources unsupported on current backend (minimal single): $e\n$st',
+          'setAudioSource unsupported on current backend (minimal single): $e\n$st',
         );
       }
       final settings = SettingsService();
@@ -1888,22 +1969,23 @@ class AudioPlayerService extends ChangeNotifier {
         await settings.setAudioBackend('system');
         // Retry once with system backend
         try {
-          await _player.setAudioSources(
-            [
-              AudioSource.uri(
-                uri,
-                tag: MediaItem(
-                  id: t.videoId,
-                  title: t.title,
-                  artist: t.artist,
-                  duration: t.duration,
-                  artUri: t.thumbnailUrl != null
-                      ? Uri.tryParse(t.thumbnailUrl!)
-                      : null,
-                  extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
-                ),
-              ),
-            ],
+          final tag = MediaItem(
+            id: t.videoId,
+            title: t.title,
+            artist: t.artist,
+            duration: t.duration,
+            artUri: t.thumbnailUrl != null
+                ? Uri.tryParse(t.thumbnailUrl!)
+                : null,
+            extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
+          );
+          // Fallback to no cache for retry simplicity
+          await _player.setAudioSource(
+            ConcatenatingAudioSource(
+              children: [AudioSource.uri(uri, tag: tag, headers: _headers)],
+              useLazyPreparation: true,
+              shuffleOrder: DefaultShuffleOrder(),
+            ),
             initialIndex: 0,
             initialPosition: Duration.zero,
           );
@@ -2163,6 +2245,11 @@ class AudioPlayerService extends ChangeNotifier {
 
   // Expose equalizer
   AndroidEqualizer get equalizer => _equalizer;
+
+  static const Map<String, String> _headers = {
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  };
 }
 
 /// Immutable lightweight snapshot for simple UI consumers that only need

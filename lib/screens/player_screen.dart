@@ -32,6 +32,7 @@ import 'package:sautifyv2/db/library_store.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/models/track_info.dart';
 import 'package:sautifyv2/screens/current_playlist_screen.dart';
+import 'package:sautifyv2/screens/equalizer_screen.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/download_service.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
@@ -97,6 +98,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _userScrollingLyrics = false;
   DateTime _lastAutoScrollAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const double _lyricRowApproxHeight = 32.0;
+  double _lyricsOffsetMs = 0.0;
 
   @override
   void initState() {
@@ -553,7 +555,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ],
           ),
         ),
-        const SizedBox(width: 48),
+        IconButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const EqualizerScreen()),
+            );
+          },
+          icon: Icon(Icons.equalizer_rounded, color: iconcolor, size: 28),
+        ),
         /* IconButton(
           onPressed: () {},
           icon: Icon(Icons.more_horiz, color: iconcolor, size: 28),
@@ -759,6 +769,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             enabledThumbRadius: 0,
                             elevation: 0,
                           ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 15,
+                          ),
                           trackHeight: 2,
                         ),
                         child: Slider(value: bufRatio, onChanged: null),
@@ -937,26 +950,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Container(
-          decoration: BoxDecoration(
-            color: cardcolor.withAlpha(50),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Center(
-            child: IconButton(
-              tooltip: 'Lyrics',
-              icon: Icon(
-                _showLyrics ? Icons.lyrics : Icons.lyrics_outlined,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                if (_showLyrics) {
-                  setState(() => _showLyrics = false);
-                } else {
-                  _loadLyricsForCurrentSong();
-                }
-              },
+        Center(
+          child: IconButton(
+            tooltip: 'Lyrics',
+            icon: Icon(
+              _showLyrics ? Icons.lyrics : Icons.lyrics_outlined,
+              color: Colors.white,
             ),
+            onPressed: () {
+              if (_showLyrics) {
+                setState(() => _showLyrics = false);
+              } else {
+                _loadLyricsForCurrentSong();
+              }
+            },
           ),
         ),
         /* IconButton(
@@ -984,21 +991,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ],
         ),
-        Container(
-          decoration: BoxDecoration(
-            color: cardcolor.withAlpha(50),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Center(
-            child: IconButton(
-              onPressed: () {
-                _navigateToCurrentPlaylist(context);
-              },
-              icon: Icon(
-                Icons.queue_music,
-                color: iconcolor.withAlpha(180),
-                size: 24,
-              ),
+        Center(
+          child: IconButton(
+            onPressed: () {
+              _navigateToCurrentPlaylist(context);
+            },
+            icon: Icon(
+              Icons.queue_music,
+              color: iconcolor.withAlpha(180),
+              size: 24,
             ),
           ),
         ),
@@ -1070,6 +1071,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _lyricsError = null;
       _lyrics = [];
       _showLyrics = true;
+      _lyricsOffsetMs = 0.0;
     });
 
     await _ensureYtReady();
@@ -1163,10 +1165,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _buildLyricsOverlay(TrackInfo? info) {
     final positionMs = (info?.position ?? Duration.zero).inMilliseconds;
+    final adjustedPos = positionMs - _lyricsOffsetMs.toInt();
 
     // Schedule auto-scroll to the active line after build
     if (_showLyrics && !_lyricsLoading && _lyrics.isNotEmpty) {
-      final newIndex = _findActiveLyricIndex(positionMs);
+      final newIndex = _findActiveLyricIndex(adjustedPos);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _maybeAutoScrollToLyric(newIndex);
       });
@@ -1219,14 +1222,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         child: LoadingIndicatorM3E(
                           containerColor: bgcolor.withAlpha(100),
                           color: appbarcolor.withAlpha(155),
-                          polygons: [
+                          /*   polygons: [
                             MaterialShapes.sunny,
                             MaterialShapes.cookie9Sided,
                             MaterialShapes.pill,
                             MaterialShapes.arrow,
                             MaterialShapes.cookie7Sided,
                             MaterialShapes.boom,
-                          ],
+                          ],*/
                         ),
                       )
                     : (_lyricsError != null
@@ -1251,7 +1254,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 itemCount: _lyrics.length,
                                 itemBuilder: (context, i) {
                                   final line = _lyrics[i];
-                                  final active = line.isActive(positionMs);
+                                  final active = line.isActive(adjustedPos);
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 4.0,
@@ -1274,6 +1277,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ),
                             )),
               ),
+              if (!_lyricsLoading && _lyricsError == null && _lyrics.isNotEmpty)
+                Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sync Offset: ${_lyricsOffsetMs.toInt()}ms',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: appbarcolor,
+                        inactiveTrackColor: Colors.white24,
+                        thumbColor: Colors.white,
+                        overlayColor: Colors.white12,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 6,
+                        ),
+                        trackHeight: 2,
+                      ),
+                      child: Slider(
+                        value: _lyricsOffsetMs,
+                        min: -5000,
+                        max: 5000,
+                        divisions: 100,
+                        label: '${_lyricsOffsetMs.toInt()}ms',
+                        onChanged: (val) {
+                          setState(() {
+                            _lyricsOffsetMs = val;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

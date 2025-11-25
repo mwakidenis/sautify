@@ -281,6 +281,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                       provider.search(v);
                     },
                     style: TextStyle(color: txtcolor),
+                    cursorColor: appbarcolor,
                     decoration: InputDecoration(
                       hintText: 'Search songs, artists, albums',
                       hintStyle: TextStyle(color: txtcolor.withOpacity(0.7)),

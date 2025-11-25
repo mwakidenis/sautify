@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.RECEIVE_NOTIFICATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application android:label="sautify" android:name="${applicationName}" android:icon="@mipmap/ic_launcher">
+    <application android:label="sautify" android:name="${applicationName}" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="true">
         <!-- AudioService (foreground service) for media playback/notification controls -->
         <service android:name="com.ryanheise.audioservice.AudioService" android:exported="true" android:foregroundServiceType="mediaPlayback" android:stopWithTask="false" tools:ignore="Instantiatable">
             <intent-filter>

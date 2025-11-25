@@ -59,6 +59,13 @@ class YTMusicService {
             }
             if (attempt > retries) rethrow;
             await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
+          } catch (e) {
+            if (kDebugMode) {
+              debugPrint('YTMusic init error (attempt $attempt): $e');
+            }
+            // Retry on other errors too (like HttpException)
+            if (attempt > retries) rethrow;
+            await Future<void>.delayed(Duration(milliseconds: 500 * attempt));
           }
         }
       } catch (e, st) {

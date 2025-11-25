@@ -3,7 +3,7 @@ description: "A new Flutter project."
 
 publish_to: "none"
 
-version: 0.0.41
+version: 0.0.42
 
 environment:
   sdk: ^3.10.0
@@ -43,7 +43,6 @@ dependencies:
   #just_audio_libwinmedia: ^0.0.4+1
   # Replaced palette_generator with material_color_utilities for lighter, faster palette extraction
   material_color_utilities: any
-  toastification: any
   connectivity_plus: any
   path_provider: any
   package_info_plus: any
@@ -59,6 +58,7 @@ dependencies:
   m3e_design: any
   marquee: any
   rxdart: any
+  just_audio_cache: ^0.1.2
 
 dependency_overrides:
   intl: 0.20.2
