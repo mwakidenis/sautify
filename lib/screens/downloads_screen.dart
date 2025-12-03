@@ -277,6 +277,20 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           style: TextStyle(color: txtcolor, fontWeight: FontWeight.bold),
         ),
         actions: [
+          Consumer<SettingsService>(
+            builder: (context, settings, child) {
+              return Row(
+                children: [
+                  const Text('Offline', style: TextStyle(fontSize: 12)),
+                  Switch(
+                    value: settings.offlineMode,
+                    onChanged: (v) => settings.setOfflineMode(v),
+                    activeColor: appbarcolor,
+                  ),
+                ],
+              );
+            },
+          ),
           IconButton(
             icon: Icon(Icons.folder_open, color: iconcolor),
             onPressed: _pickFolder,
@@ -352,8 +366,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             null, // We can't easily pass local artwork path here without extraction
         duration: Duration(milliseconds: song.duration ?? 0),
         streamUrl: song.data, // Local path
-        isLocal:
-            true, // Add a flag if StreamingData supports it, or infer from path
+        isLocal: true,
+        isAvailable: true,
       );
     }).toList();
 

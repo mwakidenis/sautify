@@ -32,7 +32,11 @@ dependencies:
   # logger: ^2.6.1
   youtube_explode_dart: any
   permission_handler: any
-  on_audio_query: any
+  on_audio_query:
+    git:
+      url: https://github.com/rozpo/on_audio_query
+      ref: 0d78299
+      path: packages/on_audio_query
   file_picker: any
   hive: any
   hive_flutter: any

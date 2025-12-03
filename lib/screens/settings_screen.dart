@@ -78,6 +78,17 @@ class SettingsScreen extends StatelessWidget {
                 onChanged: (v) => settings.setDefaultLoopMode(v),
               ),
               _tileDivider(),
+              SwitchListTile(
+                value: settings.offlineMode,
+                title: const Text('Offline Mode'),
+                subtitle: const Text('Only play downloaded/local music'),
+                activeColor: appbarcolor,
+                activeTrackColor: appbarcolor.withAlpha(140),
+                inactiveThumbColor: cardcolor.withAlpha(200),
+                inactiveTrackColor: cardcolor.withAlpha(90),
+                onChanged: (v) => settings.setOfflineMode(v),
+              ),
+              _tileDivider(),
               _dropdownTile<double>(
                 context,
                 title: AppStrings.defaultVolume(locale),

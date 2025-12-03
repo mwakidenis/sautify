@@ -647,8 +647,10 @@ class AudioPlayerService extends ChangeNotifier {
     bool force = false,
   }) async {
     // Enforce global max queue size of 25, keeping the selected track inside the window
-    List<StreamingData> cappedTracks;
-    int cappedInitialIndex;
+    List<StreamingData> cappedTracks = newTracks;
+    int cappedInitialIndex = initialIndex.clamp(0, newTracks.length - 1);
+
+    /* Removed capping logic as per user request
     if (newTracks.length > 25) {
       final total = newTracks.length;
       int start = initialIndex - 12; // aim to center selection
@@ -661,6 +663,7 @@ class AudioPlayerService extends ChangeNotifier {
       cappedTracks = newTracks;
       cappedInitialIndex = initialIndex.clamp(0, newTracks.length - 1);
     }
+    */
 
     final newFp = _computeFingerprint(cappedTracks);
     final same =
@@ -929,12 +932,14 @@ class AudioPlayerService extends ChangeNotifier {
     // Prune history if playlist gets too long and we are far ahead
     // This prevents memory growth during long sessions
     bool pruned = false;
+    /* Removed pruning logic as per user request
     if (_playlist.length > 50 && _currentIndex > 20) {
       // Remove the first item (oldest history)
       // removeTrack handles _rebuildAudioSource and notifyListeners
       await removeTrack(0);
       pruned = true;
     }
+    */
 
     // Rebuild audio source to keep order consistent when a track becomes ready
     if (!pruned && track.isReady) {
@@ -950,10 +955,15 @@ class AudioPlayerService extends ChangeNotifier {
     required bool autoPlay,
   }) async {
     final quality = _getPreferredQuality();
+    final settings = SettingsService();
     // Resolve in parallel with existing service limits
     final futures = <Future<void>>[];
     for (int i = 0; i < _playlist.length; i++) {
       if (_playlist[i].isReady && _playlist[i].streamUrl != null) continue;
+
+      // Skip network fetch if offline mode is enabled
+      if (settings.offlineMode && !_playlist[i].isLocal) continue;
+
       final idx = i;
       futures.add(() async {
         final r = await _streamingService.fetchStreamingData(

@@ -25,6 +25,7 @@ class SettingsService extends ChangeNotifier {
   static const _kDefaultSpeed = 'default_playback_speed';
   static const _kDefaultShuffle = 'default_shuffle';
   static const _kDefaultLoopMode = 'default_loop_mode'; // off | one | all
+  static const _kOfflineMode = 'offline_mode';
   // New keys
   static const _kDefaultVolume = 'default_volume'; // 0.0 - 1.0
   static const _kPreferredQuality = 'preferred_quality'; // low | medium | high
@@ -45,6 +46,7 @@ class SettingsService extends ChangeNotifier {
   double defaultPlaybackSpeed = 1.0; // 0.5 - 2.0
   bool defaultShuffle = false;
   String defaultLoopMode = 'off';
+  bool offlineMode = false;
   // New defaults
   double defaultVolume = 1.0; // 0.0 - 1.0
   String preferredQuality = 'medium'; // low | medium | high
@@ -73,6 +75,7 @@ class SettingsService extends ChangeNotifier {
         _prefs.getDouble(_kDefaultSpeed) ?? defaultPlaybackSpeed;
     defaultShuffle = _prefs.getBool(_kDefaultShuffle) ?? defaultShuffle;
     defaultLoopMode = _prefs.getString(_kDefaultLoopMode) ?? defaultLoopMode;
+    offlineMode = _prefs.getBool(_kOfflineMode) ?? offlineMode;
     // New loads
     defaultVolume = _prefs.getDouble(_kDefaultVolume) ?? defaultVolume;
     preferredQuality = _prefs.getString(_kPreferredQuality) ?? preferredQuality;
@@ -148,13 +151,17 @@ class SettingsService extends ChangeNotifier {
   }
 
   Future<void> setDefaultLoopMode(String value) async {
-    if (!['off', 'one', 'all'].contains(value)) return;
     defaultLoopMode = value;
-    await _prefs.setString(_kDefaultLoopMode, defaultLoopMode);
+    await _prefs.setString(_kDefaultLoopMode, value);
     notifyListeners();
   }
 
-  // New setters
+  Future<void> setOfflineMode(bool value) async {
+    offlineMode = value;
+    await _prefs.setBool(_kOfflineMode, value);
+    notifyListeners();
+  }
+
   Future<void> setDefaultVolume(double value) async {
     defaultVolume = value.clamp(0.0, 1.0);
     await _prefs.setDouble(_kDefaultVolume, defaultVolume);
