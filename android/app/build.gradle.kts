@@ -40,7 +40,7 @@ android {
 
         ndk {
             // Filter for the ABIs you want to support
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            // abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         }
     }
 
