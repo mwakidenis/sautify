@@ -57,6 +57,17 @@ subprojects {
             }
         }
 
+        // Force NDK version for all modules to match the installed version
+        if (project.hasProperty("android")) {
+            try {
+                val android = project.extensions.getByName("android")
+                val setNdkVersion = android.javaClass.getMethod("setNdkVersion", String::class.java)
+                setNdkVersion.invoke(android, "28.2.13676358")
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+
         tasks.withType(JavaCompile::class.java).configureEach {
             sourceCompatibility = "17"
             targetCompatibility = "17"

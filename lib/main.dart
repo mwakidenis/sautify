@@ -22,6 +22,8 @@ import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/app_localizations.dart';
 import 'package:sautifyv2/providers/set_dynamic_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
+import 'package:sautifyv2/services/dio_client.dart';
+import 'package:sautifyv2/services/widget_service.dart';
 import 'package:sautifyv2/widgets/mini_player.dart';
 
 // Legacy lightweight i18n helper is still used in other screens; not needed here
@@ -50,6 +52,9 @@ Future<void> _requestNotificationPermissionIfNeeded() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize DioClient
+  await DioClient.init();
 
   HttpOverrides.global = MyHttpOverrides();
 
@@ -100,6 +105,11 @@ void main() async {
   // Initialize the AudioPlayerService singleton
   final audioService = AudioPlayerService();
   await audioService.initialize();
+
+  // Initialize Widget Service
+  if (!AppConfig.isTest) {
+    WidgetService().init();
+  }
 
   runApp(const RestartWidget(child: MainApp()));
 }
@@ -283,6 +293,12 @@ class _MainAppState extends State<MainApp> {
                   color: txtcolor,
                   fontWeight: FontWeight.bold,
                 ),
+              ),
+              pageTransitionsTheme: const PageTransitionsTheme(
+                builders: {
+                  TargetPlatform.android: ZoomPageTransitionsBuilder(),
+                  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+                },
               ),
             ),
             locale: _toLocale(settings.localeCode),

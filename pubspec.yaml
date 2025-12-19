@@ -1,9 +1,9 @@
 name: sautifyv2
-description: "A new Flutter project."
+description: "A music streaming app, alternative  to spotify & youtube music. "
 
 publish_to: "none"
 
-version: 0.0.44
+version: 0.0.45
 
 environment:
   sdk: ^3.10.0
@@ -63,9 +63,15 @@ dependencies:
   rxdart: any
   just_audio_cache: any
   google_fonts: ^6.3.3
+  home_widget: ^0.8.1
+  audiotags: ^1.4.5
+
+  flutter_oknob: ^0.0.5
 
 dependency_overrides:
   intl: 0.20.2
+  freezed_annotation: ^3.0.0
+  flutter_rust_bridge: ^2.11.1
 
 dev_dependencies:
   flutter_test:

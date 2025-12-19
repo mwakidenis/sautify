@@ -56,4 +56,8 @@ class DioClient {
     }
     return _dio;
   }
+
+  static Future<void> init() async {
+    // No special initialization needed for standard Dio
+  }
 }

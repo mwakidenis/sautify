@@ -118,7 +118,7 @@ class HomeScreenService implements HomeService {
             : perAttemptTimeouts.last;
         try {
           final rawSections = await _yt.getHomeSections(timeout: to);
-          _homeData = HomeData.fromYTMusicSections(rawSections);
+          _homeData = await compute(_parseHomeData, rawSections);
           _lastFetchAt = DateTime.now();
           _servedFrom = HomeDataSource.fresh;
           await _persistCached(_homeData!);
@@ -205,7 +205,7 @@ class HomeScreenService implements HomeService {
         final rawSections = await _yt.getHomeSections(
           timeout: timeout ?? _netTimeout,
         );
-        final hd = HomeData.fromYTMusicSections(rawSections);
+        final hd = await compute(_parseHomeData, rawSections);
         _homeData = hd;
         _lastFetchAt = DateTime.now();
         _servedFrom = HomeDataSource.fresh;

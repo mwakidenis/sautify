@@ -16,6 +16,8 @@ class StreamingData {
   final bool isAvailable;
   // New: local file indicator
   final bool isLocal;
+  // New: local media store ID for artwork
+  final int? localId;
 
   StreamingData({
     required this.videoId,
@@ -28,6 +30,7 @@ class StreamingData {
     DateTime? cachedAt,
     this.isAvailable = false,
     this.isLocal = false,
+    this.localId,
   }) : cachedAt = cachedAt ?? DateTime.now();
 
   bool get isExpired {
@@ -50,6 +53,7 @@ class StreamingData {
     DateTime? cachedAt,
     bool? isAvailable,
     bool? isLocal,
+    int? localId,
   }) {
     return StreamingData(
       videoId: videoId ?? this.videoId,
@@ -62,6 +66,7 @@ class StreamingData {
       cachedAt: cachedAt ?? this.cachedAt,
       isAvailable: isAvailable ?? this.isAvailable,
       isLocal: isLocal ?? this.isLocal,
+      localId: localId ?? this.localId,
     );
   }
 
@@ -77,6 +82,7 @@ class StreamingData {
       'cachedAt': cachedAt.millisecondsSinceEpoch,
       'isAvailable': isAvailable,
       'isLocal': isLocal,
+      'localId': localId,
     };
   }
 
@@ -96,6 +102,7 @@ class StreamingData {
       ),
       isAvailable: json['isAvailable'] ?? false,
       isLocal: json['isLocal'] ?? false,
+      localId: json['localId'],
     );
   }
 

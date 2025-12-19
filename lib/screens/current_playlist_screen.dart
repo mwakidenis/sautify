@@ -6,6 +6,7 @@ https://creativecommons.org/licenses/by/4.0/
 
 import 'package:flutter/material.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:mini_music_visualizer/mini_music_visualizer.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
@@ -44,6 +45,50 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
           ),
         ),
         actions: [
+          // Shuffle button
+          AnimatedBuilder(
+            animation: widget.audioService,
+            builder: (context, _) {
+              final isShuffled = widget.audioService.isShuffleEnabled;
+              return IconButton(
+                onPressed: () {
+                  widget.audioService.setShuffleModeEnabled(!isShuffled);
+                },
+                icon: Icon(
+                  Icons.shuffle,
+                  color: isShuffled ? appbarcolor : iconcolor.withAlpha(180),
+                ),
+              );
+            },
+          ),
+          // Repeat button
+          AnimatedBuilder(
+            animation: widget.audioService,
+            builder: (context, _) {
+              final mode = widget.audioService.loopMode;
+              IconData icon;
+              Color color;
+              if (mode == LoopMode.one) {
+                icon = Icons.repeat_one;
+                color = appbarcolor;
+              } else if (mode == LoopMode.all) {
+                icon = Icons.repeat;
+                color = appbarcolor;
+              } else {
+                icon = Icons.repeat;
+                color = iconcolor.withAlpha(180);
+              }
+              return IconButton(
+                onPressed: () {
+                  final newMode = mode == LoopMode.off
+                      ? LoopMode.all
+                      : (mode == LoopMode.all ? LoopMode.one : LoopMode.off);
+                  widget.audioService.setLoopMode(newMode);
+                },
+                icon: Icon(icon, color: color),
+              );
+            },
+          ),
           // Rebuild count only when audioService notifies (playlist changes)
           AnimatedBuilder(
             animation: widget.audioService,

@@ -48,3 +48,6 @@ app.*.map.json
 /android/captures/
 /android/
 /lib/test*
+
+key.properties
+**/*.jks

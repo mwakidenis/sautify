@@ -23,6 +23,7 @@ class SettingsService extends ChangeNotifier {
   static const _kAutoResume = 'auto_resume_after_interruption';
   static const _kCrossfadeSeconds = 'crossfade_seconds';
   static const _kDefaultSpeed = 'default_playback_speed';
+  static const _kPitch = 'playback_pitch';
   static const _kDefaultShuffle = 'default_shuffle';
   static const _kDefaultLoopMode = 'default_loop_mode'; // off | one | all
   static const _kOfflineMode = 'offline_mode';
@@ -37,6 +38,11 @@ class SettingsService extends ChangeNotifier {
   // Equalizer settings keys
   static const _kEqualizerEnabled = 'equalizer_enabled';
   static const _kEqualizerBands = 'equalizer_bands'; // index:gain,index:gain
+  static const _kLoudnessEnhancerEnabled = 'loudness_enhancer_enabled';
+  static const _kLoudnessEnhancerTargetGain = 'loudness_enhancer_target_gain';
+  static const _kBassBoostEnabled = 'bass_boost_enabled';
+  static const _kBassBoostStrength = 'bass_boost_strength';
+  static const _kSkipSilenceEnabled = 'skip_silence_enabled';
 
   // Defaults
   bool duckOnInterruption = true;
@@ -44,6 +50,7 @@ class SettingsService extends ChangeNotifier {
   bool autoResumeAfterInterruption = true;
   int crossfadeSeconds = 0; // 0 - 12
   double defaultPlaybackSpeed = 1.0; // 0.5 - 2.0
+  double pitch = 1.0; // 0.5 - 2.0
   bool defaultShuffle = false;
   String defaultLoopMode = 'off';
   bool offlineMode = false;
@@ -59,6 +66,11 @@ class SettingsService extends ChangeNotifier {
   // Equalizer settings defaults
   bool equalizerEnabled = false;
   Map<int, double> equalizerBands = {};
+  bool loudnessEnhancerEnabled = false;
+  double loudnessEnhancerTargetGain = 0.0;
+  bool bassBoostEnabled = false;
+  int bassBoostStrength = 0;
+  bool skipSilenceEnabled = false;
 
   bool get isReady => _ready;
 
@@ -73,6 +85,7 @@ class SettingsService extends ChangeNotifier {
     crossfadeSeconds = _prefs.getInt(_kCrossfadeSeconds) ?? crossfadeSeconds;
     defaultPlaybackSpeed =
         _prefs.getDouble(_kDefaultSpeed) ?? defaultPlaybackSpeed;
+    pitch = _prefs.getDouble(_kPitch) ?? pitch;
     defaultShuffle = _prefs.getBool(_kDefaultShuffle) ?? defaultShuffle;
     defaultLoopMode = _prefs.getString(_kDefaultLoopMode) ?? defaultLoopMode;
     offlineMode = _prefs.getBool(_kOfflineMode) ?? offlineMode;
@@ -90,6 +103,15 @@ class SettingsService extends ChangeNotifier {
         (_box?.get(_kShowSearchSuggestions) as bool?) ?? showSearchSuggestions;
     // Load equalizer settings
     equalizerEnabled = (_prefs.getBool(_kEqualizerEnabled) ?? equalizerEnabled);
+    loudnessEnhancerEnabled =
+        _prefs.getBool(_kLoudnessEnhancerEnabled) ?? loudnessEnhancerEnabled;
+    loudnessEnhancerTargetGain =
+        _prefs.getDouble(_kLoudnessEnhancerTargetGain) ??
+        loudnessEnhancerTargetGain;
+    bassBoostEnabled = _prefs.getBool(_kBassBoostEnabled) ?? bassBoostEnabled;
+    bassBoostStrength = _prefs.getInt(_kBassBoostStrength) ?? bassBoostStrength;
+    skipSilenceEnabled =
+        _prefs.getBool(_kSkipSilenceEnabled) ?? skipSilenceEnabled;
     final loadedBands = _prefs.getString(_kEqualizerBands);
     if (loadedBands != null) {
       try {
@@ -141,6 +163,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setDefaultPlaybackSpeed(double value) async {
     defaultPlaybackSpeed = double.parse(value.toStringAsFixed(2));
     await _prefs.setDouble(_kDefaultSpeed, defaultPlaybackSpeed);
+    notifyListeners();
+  }
+
+  Future<void> setPitch(double value) async {
+    pitch = double.parse(value.toStringAsFixed(2));
+    await _prefs.setDouble(_kPitch, pitch);
     notifyListeners();
   }
 
@@ -219,12 +247,43 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setLoudnessEnhancerEnabled(bool value) async {
+    loudnessEnhancerEnabled = value;
+    await _prefs.setBool(_kLoudnessEnhancerEnabled, value);
+    notifyListeners();
+  }
+
+  Future<void> setLoudnessEnhancerTargetGain(double value) async {
+    loudnessEnhancerTargetGain = value;
+    await _prefs.setDouble(_kLoudnessEnhancerTargetGain, value);
+    notifyListeners();
+  }
+
+  Future<void> setBassBoostEnabled(bool value) async {
+    bassBoostEnabled = value;
+    await _prefs.setBool(_kBassBoostEnabled, value);
+    notifyListeners();
+  }
+
+  Future<void> setBassBoostStrength(int value) async {
+    bassBoostStrength = value;
+    await _prefs.setInt(_kBassBoostStrength, value);
+    notifyListeners();
+  }
+
+  Future<void> setSkipSilenceEnabled(bool value) async {
+    skipSilenceEnabled = value;
+    await _prefs.setBool(_kSkipSilenceEnabled, value);
+    notifyListeners();
+  }
+
   Future<void> resetToDefaults() async {
     duckOnInterruption = true;
     duckVolume = 0.5;
     autoResumeAfterInterruption = true;
     crossfadeSeconds = 0;
     defaultPlaybackSpeed = 1.0;
+    pitch = 1.0;
     defaultShuffle = false;
     defaultLoopMode = 'off';
     defaultVolume = 1.0;
@@ -234,12 +293,18 @@ class SettingsService extends ChangeNotifier {
     showSearchSuggestions = false;
     equalizerEnabled = false;
     equalizerBands = {};
+    loudnessEnhancerEnabled = false;
+    loudnessEnhancerTargetGain = 0.0;
+    bassBoostEnabled = false;
+    bassBoostStrength = 0;
+    skipSilenceEnabled = false;
 
     await _prefs.setBool(_kDuckOnInterruption, duckOnInterruption);
     await _prefs.setDouble(_kDuckVolume, duckVolume);
     await _prefs.setBool(_kAutoResume, autoResumeAfterInterruption);
     await _prefs.setInt(_kCrossfadeSeconds, crossfadeSeconds);
     await _prefs.setDouble(_kDefaultSpeed, defaultPlaybackSpeed);
+    await _prefs.setDouble(_kPitch, pitch);
     await _prefs.setBool(_kDefaultShuffle, defaultShuffle);
     await _prefs.setString(_kDefaultLoopMode, defaultLoopMode);
     await _prefs.setDouble(_kDefaultVolume, defaultVolume);
@@ -250,6 +315,14 @@ class SettingsService extends ChangeNotifier {
     await _prefs.setString(_kLocaleCode, localeCode);
     await _prefs.setBool(_kEqualizerEnabled, equalizerEnabled);
     await _prefs.setString(_kEqualizerBands, '');
+    await _prefs.setBool(_kLoudnessEnhancerEnabled, loudnessEnhancerEnabled);
+    await _prefs.setDouble(
+      _kLoudnessEnhancerTargetGain,
+      loudnessEnhancerTargetGain,
+    );
+    await _prefs.setBool(_kBassBoostEnabled, bassBoostEnabled);
+    await _prefs.setInt(_kBassBoostStrength, bassBoostStrength);
+    await _prefs.setBool(_kSkipSilenceEnabled, skipSilenceEnabled);
 
     notifyListeners();
   }

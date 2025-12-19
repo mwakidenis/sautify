@@ -368,6 +368,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         streamUrl: song.data, // Local path
         isLocal: true,
         isAvailable: true,
+        localId: song.id,
       );
     }).toList();
 

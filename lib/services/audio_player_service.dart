@@ -29,12 +29,15 @@ class AudioPlayerService extends ChangeNotifier {
   factory AudioPlayerService() => _instance ??= AudioPlayerService._internal();
 
   final AndroidEqualizer _equalizer = AndroidEqualizer();
+  final AndroidLoudnessEnhancer _loudnessEnhancer = AndroidLoudnessEnhancer();
   late final AudioPlayer _player;
 
   AudioPlayerService._internal() {
     // Always use AudioPipeline (and Equalizer) since MediaKit is removed
     _player = AudioPlayer(
-      audioPipeline: AudioPipeline(androidAudioEffects: [_equalizer]),
+      audioPipeline: AudioPipeline(
+        androidAudioEffects: [_equalizer, _loudnessEnhancer],
+      ),
     );
     _applyEqualizerSettings();
   }
@@ -45,8 +48,45 @@ class AudioPlayerService extends ChangeNotifier {
       await settings.init();
     }
 
+    // Check if current track is local
+    bool isLocal = false;
+    if (_playlist.isNotEmpty &&
+        _currentIndex >= 0 &&
+        _currentIndex < _playlist.length) {
+      isLocal = _playlist[_currentIndex].isLocal;
+    }
+
+    // Apply speed and pitch safely
+    try {
+      if (isLocal) {
+        // Reset to defaults for local files to avoid codec issues
+        if (_player.speed != 1.0) await _player.setSpeed(1.0);
+        if (_player.pitch != 1.0) await _player.setPitch(1.0);
+        if (_player.skipSilenceEnabled) {
+          await _player.setSkipSilenceEnabled(false);
+        }
+      } else {
+        if (settings.defaultPlaybackSpeed != 1.0) {
+          await _player.setSpeed(settings.defaultPlaybackSpeed);
+        }
+        if (settings.pitch != 1.0) {
+          await _player.setPitch(settings.pitch);
+        }
+        if (settings.skipSilenceEnabled) {
+          await _player.setSkipSilenceEnabled(settings.skipSilenceEnabled);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error applying playback settings: $e');
+    }
+
     try {
       await _equalizer.setEnabled(settings.equalizerEnabled);
+      await _loudnessEnhancer.setEnabled(settings.loudnessEnhancerEnabled);
+      await _loudnessEnhancer.setTargetGain(
+        settings.loudnessEnhancerTargetGain,
+      );
+
       final parameters = await _equalizer.parameters;
       for (final entry in settings.equalizerBands.entries) {
         final band = parameters.bands.firstWhere(
@@ -55,7 +95,9 @@ class AudioPlayerService extends ChangeNotifier {
               .bands[0], // Fallback, though unlikely if index is valid
         );
         if (band.index == entry.key) {
-          await band.setGain(entry.value);
+          await band.setGain(
+            entry.value.clamp(parameters.minDecibels, parameters.maxDecibels),
+          );
         }
       }
     } catch (_) {
@@ -278,6 +320,7 @@ class AudioPlayerService extends ChangeNotifier {
 
   // Getters
   AudioPlayer get player => _player;
+  AndroidLoudnessEnhancer get loudnessEnhancer => _loudnessEnhancer;
   List<StreamingData> get playlist => _playlist;
   int get currentIndex => _currentIndex;
   bool get isShuffleEnabled => _isShuffleEnabled;
@@ -555,6 +598,7 @@ class AudioPlayerService extends ChangeNotifier {
           notifyListeners();
           _preloadUpcomingSongs();
           _warmNextConnection();
+          _applyEqualizerSettings();
         }
       }
     });
@@ -598,8 +642,20 @@ class AudioPlayerService extends ChangeNotifier {
   Future<void> refreshDynamicSettings() async {
     final settings = SettingsService();
     if (!settings.isReady) return;
+
+    bool isLocal = false;
+    if (_playlist.isNotEmpty &&
+        _currentIndex >= 0 &&
+        _currentIndex < _playlist.length) {
+      isLocal = _playlist[_currentIndex].isLocal;
+    }
+
     try {
-      await _player.setSpeed(settings.defaultPlaybackSpeed);
+      if (isLocal) {
+        if (_player.speed != 1.0) await _player.setSpeed(1.0);
+      } else {
+        await _player.setSpeed(settings.defaultPlaybackSpeed);
+      }
     } catch (_) {}
     try {
       await _player.setVolume(settings.defaultVolume);
@@ -709,6 +765,7 @@ class AudioPlayerService extends ChangeNotifier {
 
       _playlist = cappedTracks;
       _currentIndex = cappedInitialIndex;
+      _applyEqualizerSettings();
       _materializedIndices.clear();
       _preloadedIndices.clear();
 
@@ -1354,15 +1411,28 @@ class AudioPlayerService extends ChangeNotifier {
   /// Set shuffle mode
   Future<void> setShuffleModeEnabled(bool enabled) async {
     _isShuffleEnabled = enabled;
-    await _player.setShuffleModeEnabled(enabled);
     notifyListeners();
+    try {
+      await _player.setShuffleModeEnabled(enabled);
+    } catch (e) {
+      _isShuffleEnabled = !enabled;
+      notifyListeners();
+      debugPrint('Error setting shuffle mode: $e');
+    }
   }
 
   /// Set loop mode
   Future<void> setLoopMode(LoopMode mode) async {
+    final oldMode = _loopMode;
     _loopMode = mode;
-    await _player.setLoopMode(mode);
     notifyListeners();
+    try {
+      await _player.setLoopMode(mode);
+    } catch (e) {
+      _loopMode = oldMode;
+      notifyListeners();
+      debugPrint('Error setting loop mode: $e');
+    }
   }
 
   /// Set playback speed

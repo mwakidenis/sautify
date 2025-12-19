@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/strings.dart';
@@ -43,9 +44,16 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 title: AppStrings.playbackSpeed(locale),
                 subtitle: 'Applies to newly started tracks',
-                current: settings.defaultPlaybackSpeed,
-                items: const [0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0],
-                itemLabel: (v) => '${v}x',
+                current: double.parse(
+                  settings.defaultPlaybackSpeed.toStringAsFixed(2),
+                ),
+                items: {
+                  ...const [0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0],
+                  double.parse(
+                    settings.defaultPlaybackSpeed.toStringAsFixed(2),
+                  ),
+                }.toList()..sort(),
+                itemLabel: (v) => '${v.toStringAsFixed(2)}x',
                 onChanged: (v) => settings.setDefaultPlaybackSpeed(v),
               ),
               _tileDivider(),
@@ -94,7 +102,10 @@ class SettingsScreen extends StatelessWidget {
                 title: AppStrings.defaultVolume(locale),
                 subtitle: 'New tracks will start at this volume',
                 current: settings.defaultVolume,
-                items: const [0.4, 0.6, 0.8, 1.0],
+                items: {
+                  ...const [0.4, 0.6, 0.8, 1.0],
+                  settings.defaultVolume,
+                }.toList()..sort(),
                 itemLabel: (v) => '${(v * 100).round()}%',
                 onChanged: (v) => settings.setDefaultVolume(v),
               ),
@@ -171,6 +182,31 @@ class SettingsScreen extends StatelessWidget {
                 inactiveThumbColor: cardcolor.withAlpha(200),
                 inactiveTrackColor: cardcolor.withAlpha(90),
                 onChanged: (v) => settings.setAutoResumeAfterInterruption(v),
+              ),
+              _tileDivider(),
+              ListTile(
+                title: const Text('Disable Battery Optimization'),
+                subtitle: const Text(
+                  'Prevents playback stopping in background',
+                ),
+                trailing: const Icon(Icons.battery_alert),
+                onTap: () async {
+                  final status =
+                      await Permission.ignoreBatteryOptimizations.status;
+                  if (status.isGranted) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Battery optimization already disabled',
+                          ),
+                        ),
+                      );
+                    }
+                  } else {
+                    await Permission.ignoreBatteryOptimizations.request();
+                  }
+                },
               ),
             ]),
 

@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
-import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:provider/provider.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/models/track_info.dart';
@@ -137,15 +136,28 @@ class _MiniPlayerState extends State<MiniPlayer> {
                       //(value: 0.6),
                       // Progress bar - now uses the synchronized progress from trackInfo
                       Container(
-                        height: 2,
+                        height: 2.5,
                         margin: const EdgeInsets.only(left: 16, right: 16),
-                        child: LinearProgressIndicatorM3E(
+                        child: /* LinearProgressIndicatorM3E(
                           inset: 0,
                           shape: ProgressM3EShape.flat,
                           size: LinearProgressM3ESize.s,
                           value: progress,
                           trackColor: iconcolor,
                           activeColor: appbarcolor,
+                        ),
+                        */ Padding(
+                          padding: const EdgeInsets.only(left: 8.0, right: 8.0),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12.0),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              backgroundColor: iconcolor.withAlpha(100),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                appbarcolor,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
 

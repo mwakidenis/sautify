@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:audiotags/audiotags.dart';
 import 'package:dart_ytmusic_api/yt_music.dart';
 import 'package:flutter/foundation.dart'
     show consolidateHttpClientResponseBytes;
@@ -19,11 +20,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 //import 'package:flutter_audio_output/flutter_audio_output.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
+import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:marquee/marquee.dart';
 import 'package:material_color_utilities/material_color_utilities.dart' as mcu;
 import 'package:material_new_shapes/material_new_shapes.dart';
+import 'package:on_audio_query/on_audio_query.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:provider/provider.dart';
@@ -81,6 +84,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Dynamic background colors based on current artwork
   List<Color> _bgColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
   String? _lastArtworkUrl;
+  int? _lastLocalId;
+  Uint8List? _localArtworkBytes;
   //settings\
   final _settings = SettingsService();
 
@@ -253,10 +258,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
           final artworkUrl = info?.thumbnailUrl ?? widget.imageUrl;
           final duration = info?.duration ?? widget.duration;
           final position = info?.position ?? Duration.zero;
+          final localId = info?.track?.localId;
 
           // Update gradient palette when artwork changes
-          if (artworkUrl != null && artworkUrl != _lastArtworkUrl) {
+          if (localId != null) {
+            if (localId != _lastLocalId) {
+              _lastLocalId = localId;
+              _lastArtworkUrl = null;
+              _updatePaletteFromLocalId(localId);
+            }
+          } else if (artworkUrl != null && artworkUrl != _lastArtworkUrl) {
             _lastArtworkUrl = artworkUrl;
+            _lastLocalId = null;
+            _localArtworkBytes = null;
             _updatePaletteFromArtwork(artworkUrl);
           }
 
@@ -277,21 +291,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
 
                 // Reactive blurred album-art background with smooth cross-fade
-                if (artworkUrl != null)
+                if (artworkUrl != null || _localArtworkBytes != null)
                   Positioned.fill(
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 400),
                       switchInCurve: Curves.easeIn,
                       switchOutCurve: Curves.easeOut,
                       child: Stack(
-                        key: ValueKey(artworkUrl),
+                        key: ValueKey(artworkUrl ?? _lastLocalId),
                         fit: StackFit.expand,
                         children: [
-                          CachedNetworkImage(
-                            imageUrl: artworkUrl,
-                            fit: BoxFit.cover,
-                            errorWidget: Container(color: Colors.black),
-                          ),
+                          if (_localArtworkBytes != null)
+                            Image.memory(
+                              _localArtworkBytes!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  Container(color: Colors.black),
+                            )
+                          else
+                            CachedNetworkImage(
+                              imageUrl: artworkUrl!,
+                              fit: BoxFit.cover,
+                              errorWidget: Container(color: Colors.black),
+                            ),
                           BackdropFilter(
                             // Lower blur radius for performance while keeping the look
                             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
@@ -321,7 +343,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           child: Stack(
                             children: [
                               RepaintBoundary(
-                                child: _buildAlbumArt(artworkUrl),
+                                child: _buildAlbumArt(artworkUrl, info: info),
                               ),
                               if (info?.hasTrack == true)
                                 /* Positioned(
@@ -406,6 +428,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
           await cache.getCachedImage(url) ?? await _fetchImageBytes(url);
       if (bytes == null || bytes.isEmpty) return;
 
+      await _generatePaletteFromBytes(bytes);
+    } catch (e) {
+      debugPrint('Error updating palette: $e');
+    }
+  }
+
+  Future<void> _updatePaletteFromLocalId(int id) async {
+    try {
+      final OnAudioQuery audioQuery = OnAudioQuery();
+      final bytes = await audioQuery.queryArtwork(
+        id,
+        ArtworkType.AUDIO,
+        format: ArtworkFormat.JPEG,
+        size: 1000,
+        quality: 100,
+      );
+
+      if (mounted) {
+        setState(() {
+          _localArtworkBytes = bytes;
+        });
+      }
+
+      if (bytes == null || bytes.isEmpty) {
+        // Reset to default if no artwork
+        if (mounted) {
+          setState(() {
+            _bgColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+          });
+        }
+        return;
+      }
+
+      await _generatePaletteFromBytes(bytes);
+    } catch (e) {
+      debugPrint('Error updating palette from local ID: $e');
+    }
+  }
+
+  Future<void> _generatePaletteFromBytes(Uint8List bytes) async {
+    try {
       // Slight defer to avoid blocking transition to player screen
       await Future<void>.delayed(const Duration(milliseconds: 40));
 
@@ -586,7 +649,75 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildAlbumArt(String? imageUrl) {
+  Widget _buildAlbumArt(String? imageUrl, {TrackInfo? info}) {
+    final track = info?.track;
+    final isLocal = track?.isLocal ?? false;
+    final localId = track?.localId;
+
+    if (isLocal && localId != null) {
+      if (_localArtworkBytes != null) {
+        return Center(
+          child: Container(
+            width: 320,
+            height: 320,
+            clipBehavior: Clip.antiAliasWithSaveLayer,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(100),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              clipBehavior: Clip.antiAliasWithSaveLayer,
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                _localArtworkBytes!,
+                width: 320,
+                height: 320,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildDefaultAlbumArt(),
+              ),
+            ),
+          ),
+        );
+      }
+
+      return Center(
+        child: Container(
+          width: 320,
+          height: 320,
+          clipBehavior: Clip.antiAliasWithSaveLayer,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(100),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            clipBehavior: Clip.antiAliasWithSaveLayer,
+            borderRadius: BorderRadius.circular(12),
+            child: QueryArtworkWidget(
+              id: localId,
+              type: ArtworkType.AUDIO,
+              artworkHeight: 320,
+              artworkWidth: 320,
+              artworkFit: BoxFit.cover,
+              nullArtworkWidget: _buildDefaultAlbumArt(),
+            ),
+          ),
+        ),
+      );
+    }
+
     final isLocalImage =
         imageUrl != null &&
         (imageUrl.startsWith('file://') ||
@@ -680,20 +811,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
             children: [
               SizedBox(
                 width: MediaQuery.of(context).size.width * 90,
-                height: 30,
-                child: Marquee(
-                  // rtl: true,
-                  text: title,
-                  startAfter: Duration(seconds: 10),
-                  pauseAfterRound: Duration(seconds: 5),
-                  style: TextStyle(
-                    color: txtcolor,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                height: 40,
+                child: (title.length.toInt() >= 15)
+                    ? Marquee(
+                        // rtl: true,
+                        text: title,
+                        startAfter: Duration(seconds: 10),
+                        pauseAfterRound: Duration(seconds: 5),
+                        style: TextStyle(
+                          color: txtcolor,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
 
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      )
+                    : Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: txtcolor,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -971,8 +1113,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
+        IconButton(
+          /*  style: ElevatedButton.styleFrom(
             backgroundColor: _showLyrics
                 ? appbarcolor
                 : cardcolor.withAlpha(160),
@@ -984,10 +1126,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               vertical: 6.0,
             ),
           ),
-          label: Text('Lyrics', style: TextStyle(color: txtcolor)),
+          label: Text('Lyrics', style: TextStyle(color: txtcolor)),*/
           icon: Icon(
             _showLyrics ? Icons.lyrics : Icons.lyrics_outlined,
-            color: Colors.white,
+            color: iconcolor.withAlpha(180),
           ),
           onPressed: () {
             if (_showLyrics) {
@@ -998,6 +1140,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
         ),
         //cast will be  done  soon!
+        /*
         IconButton(
           style: IconButton.styleFrom(
             backgroundColor: cardcolor.withAlpha(160),
@@ -1038,16 +1181,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
             size: 24,
           ),
         ),
+        */
         /* IconButton(
           onPressed: () {},
           icon: Icon(Icons.devices, color: iconcolor.withAlpha(180), size: 24),
-        ),
+        ),*/
         Row(
           children: [
             //Icon(Icons.headphones, color: appbarcolor, size: 16),
             const SizedBox(width: 8),
             SizedBox(
-              width: 200,
+              width: 150,
               height: 16,
               child: Marquee(
                 text: ' Sautify Playing $title.',
@@ -1062,9 +1206,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ],
-        ),*/
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
+        ),
+        IconButton(
+          /*   style: ElevatedButton.styleFrom(
             backgroundColor: cardcolor.withAlpha(160),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
@@ -1074,7 +1218,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               vertical: 6.0,
             ),
           ),
-          label: Text('Up next', style: TextStyle(color: txtcolor)),
+          // label: Text('', style: TextStyle(color: txtcolor)),*/
           onPressed: () {
             _navigateToCurrentPlaylist(context);
           },
@@ -1497,6 +1641,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return _DownloadProgressDialog(
           url: track.streamUrl!,
           savePath: savePath,
+          title: track.title,
+          artist: track.artist,
+          imageUrl: track.thumbnailUrl,
         );
       },
     );
@@ -1506,7 +1653,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
 class _DownloadProgressDialog extends StatefulWidget {
   final String url;
   final String savePath;
-  const _DownloadProgressDialog({required this.url, required this.savePath});
+  final String? title;
+  final String? artist;
+  final String? imageUrl;
+
+  const _DownloadProgressDialog({
+    required this.url,
+    required this.savePath,
+    this.title,
+    this.artist,
+    this.imageUrl,
+  });
 
   @override
   State<_DownloadProgressDialog> createState() =>
@@ -1535,7 +1692,44 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
           });
         }
       },
-      onDone: () {
+      onDone: () async {
+        // Write metadata
+        try {
+          if (mounted) {
+            setState(() {
+              _status = 'Writing tags...';
+            });
+          }
+
+          List<Picture> pictures = [];
+          if (widget.imageUrl != null) {
+            try {
+              final response = await http.get(Uri.parse(widget.imageUrl!));
+              if (response.statusCode == 200) {
+                pictures = [
+                  Picture(
+                    pictureType: PictureType.coverFront,
+                    mimeType: MimeType.jpeg,
+                    bytes: response.bodyBytes,
+                  ),
+                ];
+              }
+            } catch (e) {
+              debugPrint('Error downloading album art: $e');
+            }
+          }
+
+          Tag tag = Tag(
+            title: widget.title,
+            trackArtist: widget.artist,
+            pictures: pictures,
+          );
+
+          await AudioTags.write(widget.savePath, tag);
+        } catch (e) {
+          debugPrint('Error writing tags: $e');
+        }
+
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
