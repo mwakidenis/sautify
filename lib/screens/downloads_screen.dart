@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:on_audio_query/on_audio_query.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/app_localizations.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
@@ -158,28 +157,46 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: cardcolor,
-        title: Text('Enter Folder Path', style: TextStyle(color: txtcolor)),
+        backgroundColor: Theme.of(context).cardColor,
+        title: Text(
+          'Enter Folder Path',
+          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+        ),
         content: TextField(
           controller: controller,
-          style: TextStyle(color: txtcolor),
+          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
           decoration: InputDecoration(
             labelText: 'Path',
-            labelStyle: TextStyle(color: txtcolor.withOpacity(0.7)),
+            labelStyle: TextStyle(
+              color: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.color?.withOpacity(0.7),
+            ),
             hintText: '/storage/emulated/0/Music',
-            hintStyle: TextStyle(color: txtcolor.withOpacity(0.3)),
+            hintStyle: TextStyle(
+              color: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.color?.withOpacity(0.3),
+            ),
             enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: txtcolor.withOpacity(0.3)),
+              borderSide: BorderSide(color: Theme.of(context).dividerColor),
             ),
             focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: appbarcolor),
+              borderSide: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: txtcolor)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () {
@@ -193,7 +210,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 Navigator.pop(context);
               }
             },
-            child: Text('Save', style: TextStyle(color: appbarcolor)),
+            child: Text(
+              'Save',
+              style: TextStyle(color: Theme.of(context).colorScheme.primary),
+            ),
           ),
         ],
       ),
@@ -215,13 +235,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           children: [
             Text(
               l10n.permissionDenied,
-              style: TextStyle(color: txtcolor, fontSize: 18),
+              style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _checkPermissionAndLoad,
               style: ElevatedButton.styleFrom(
-                backgroundColor: appbarcolor,
+                backgroundColor: Theme.of(context).colorScheme.primary,
                 foregroundColor: Colors.white,
               ),
               child: Text(l10n.grantPermission),
@@ -239,17 +259,21 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             Icon(
               Icons.music_off_rounded,
               size: 64,
-              color: iconcolor.withOpacity(0.5),
+              color: Theme.of(context).iconTheme.color?.withOpacity(0.5),
             ),
             const SizedBox(height: 16),
             Text(
               l10n.noSongsFound,
-              style: TextStyle(color: txtcolor.withOpacity(0.7), fontSize: 16),
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.color?.withOpacity(0.7),
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Path: ${Provider.of<SettingsService>(context).downloadPath}',
-              style: TextStyle(color: txtcolor.withOpacity(0.5), fontSize: 12),
+              style: Theme.of(context).textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -258,7 +282,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               icon: Icon(Icons.folder_open, size: 18),
               label: Text('Select Folder'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: appbarcolor,
+                backgroundColor: Theme.of(context).colorScheme.primary,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -268,13 +292,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
 
     return Scaffold(
-      backgroundColor: bgcolor,
+      // backgroundColor: bgcolor,
       appBar: AppBar(
-        backgroundColor: bgcolor,
+        // backgroundColor: bgcolor,
         elevation: 0,
         title: Text(
           l10n.downloadsTitle,
-          style: TextStyle(color: txtcolor, fontWeight: FontWeight.bold),
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         ),
         actions: [
           Consumer<SettingsService>(
@@ -285,19 +311,22 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   Switch(
                     value: settings.offlineMode,
                     onChanged: (v) => settings.setOfflineMode(v),
-                    activeThumbColor: appbarcolor,
+                    activeThumbColor: Theme.of(context).colorScheme.primary,
                   ),
                 ],
               );
             },
           ),
           IconButton(
-            icon: Icon(Icons.folder_open, color: iconcolor),
+            icon: Icon(
+              Icons.folder_open,
+              color: Theme.of(context).iconTheme.color,
+            ),
             onPressed: _pickFolder,
             tooltip: 'Change Folder',
           ),
           IconButton(
-            icon: Icon(Icons.refresh, color: iconcolor),
+            icon: Icon(Icons.refresh, color: Theme.of(context).iconTheme.color),
             onPressed: _loadSongs,
           ),
         ],
@@ -307,36 +336,58 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         itemCount: _songs.length,
         itemBuilder: (context, index) {
           final song = _songs[index];
-          return ListTile(
-            leading: QueryArtworkWidget(
-              id: song.id,
-              type: ArtworkType.AUDIO,
-              nullArtworkWidget: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: cardcolor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.music_note, color: iconcolor),
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary.withAlpha(30),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary.withAlpha(50),
+                width: 1,
               ),
-              artworkBorder: BorderRadius.circular(8),
-              artworkWidth: 50,
-              artworkHeight: 50,
             ),
-            title: Text(
-              song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: txtcolor, fontWeight: FontWeight.w500),
+            child: ListTile(
+              leading: QueryArtworkWidget(
+                id: song.id,
+                type: ArtworkType.AUDIO,
+                nullArtworkWidget: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.music_note,
+                    color: Theme.of(context).iconTheme.color,
+                  ),
+                ),
+                artworkBorder: BorderRadius.circular(8),
+                artworkWidth: 50,
+                artworkHeight: 50,
+              ),
+              title: Text(
+                song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
+              ),
+              subtitle: Text(
+                song.artist ?? '<Unknown>',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.color?.withOpacity(0.7),
+                ),
+              ),
+              onTap: () => _playSong(index),
             ),
-            subtitle: Text(
-              song.artist ?? '<Unknown>',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: txtcolor.withOpacity(0.7)),
-            ),
-            onTap: () => _playSong(index),
           );
         },
       ),

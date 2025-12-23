@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_oknob/flutter_oldschool_knob.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/settings_service.dart';
 
@@ -21,7 +20,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   AndroidEqualizerParameters? _parameters;
   bool _isLoading = true;
   bool _isEnabled = false;
-  double _value = 0.5;
+  final double _value = 0.5;
 
   @override
   void initState() {
@@ -49,29 +48,34 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final scaffoldBackgroundColor = Theme.of(context).scaffoldBackgroundColor;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
+
     if (!Platform.isAndroid) {
       return Scaffold(
-        backgroundColor: bgcolor,
+        backgroundColor: scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('Equalizer'),
-          backgroundColor: bgcolor,
-          foregroundColor: Colors.white,
+          backgroundColor: scaffoldBackgroundColor,
+          foregroundColor: textColor,
         ),
-        body: const Center(
+        body: Center(
           child: Text(
             'Equalizer is only available on Android',
-            style: TextStyle(color: Colors.white),
+            style: TextStyle(color: textColor),
           ),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: bgcolor,
+      backgroundColor: scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Equalizer'),
-        backgroundColor: bgcolor,
-        foregroundColor: Colors.white,
+        backgroundColor: scaffoldBackgroundColor,
+        foregroundColor: textColor,
         actions: [
           Switch(
             value: _isEnabled,
@@ -80,23 +84,23 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
               await _settings.setEqualizerEnabled(value);
               await _audioService.equalizer.setEnabled(value);
             },
-            activeThumbColor: appbarcolor,
+            activeThumbColor: primaryColor,
           ),
         ],
       ),
       body: _isLoading
           ? Center(
               child: LoadingIndicatorM3E(
-                containerColor: appbarcolor.withAlpha(100),
+                containerColor: primaryColor.withAlpha(100),
                 variant: LoadingIndicatorM3EVariant.contained,
-                color: appbarcolor,
+                color: primaryColor,
               ),
             )
           : _parameters == null
-          ? const Center(
+          ? Center(
               child: Text(
                 'Equalizer not available',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(color: textColor),
               ),
             )
           : _buildBands(),
@@ -107,6 +111,10 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
     final bands = _parameters!.bands;
     final minDecibels = _parameters!.minDecibels;
     final maxDecibels = _parameters!.maxDecibels;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
+    final cardColor = Theme.of(context).cardColor;
 
     return SingleChildScrollView(
       child: Column(
@@ -145,8 +153,10 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                             value: currentGain.clamp(-15.0, 15.0),
                             min: -15.0,
                             max: 15.0,
-                            activeColor: _isEnabled ? appbarcolor : Colors.grey,
-                            inactiveColor: cardcolor,
+                            activeColor: _isEnabled
+                                ? primaryColor
+                                : Colors.grey,
+                            inactiveColor: cardColor,
                             onChanged: _isEnabled
                                 ? (value) async {
                                     setState(() {
@@ -170,7 +180,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     Text(
                       freqLabel,
                       style: TextStyle(
-                        color: _isEnabled ? txtcolor : Colors.grey,
+                        color: _isEnabled ? textColor : Colors.grey,
                         fontSize: 12,
                       ),
                     ),
@@ -179,7 +189,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                       '${currentGain.toStringAsFixed(1)} dB',
                       style: TextStyle(
                         color: _isEnabled
-                            ? txtcolor.withAlpha(150)
+                            ? textColor.withAlpha(150)
                             : Colors.grey,
                         fontSize: 10,
                       ),
@@ -204,7 +214,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                 : null,
             child: Text(
               'Reset to Flat',
-              style: TextStyle(color: _isEnabled ? appbarcolor : Colors.grey),
+              style: TextStyle(color: _isEnabled ? primaryColor : Colors.grey),
             ),
           ),
           //     const Divider(color: Colors.grey),
@@ -221,12 +231,16 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   }
 
   Widget _buildSkipSilenceControl() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('Skip Silence', style: TextStyle(color: Colors.white)),
+          Text('Skip Silence', style: TextStyle(color: textColor)),
           Switch(
             value: _settings.skipSilenceEnabled,
             onChanged: (value) async {
@@ -236,7 +250,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
               await _audioService.player.setSkipSilenceEnabled(value);
               await _settings.setSkipSilenceEnabled(value);
             },
-            activeThumbColor: appbarcolor,
+            activeThumbColor: primaryColor,
           ),
         ],
       ),
@@ -244,6 +258,10 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   }
 
   Widget _buildLoudnessEnhancerControl() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
+
     return Column(
       children: [
         Padding(
@@ -251,10 +269,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Loudness Enhancer',
-                style: TextStyle(color: Colors.white),
-              ),
+              Text('Loudness Enhancer', style: TextStyle(color: textColor)),
               Switch(
                 value: _settings.loudnessEnhancerEnabled,
                 onChanged: (value) async {
@@ -264,7 +279,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                   await _audioService.loudnessEnhancer.setEnabled(value);
                   await _settings.setLoudnessEnhancerEnabled(value);
                 },
-                activeThumbColor: appbarcolor,
+                activeThumbColor: primaryColor,
               ),
             ],
           ),
@@ -293,9 +308,9 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     await _audioService.loudnessEnhancer.setTargetGain(rounded);
                     await _settings.setLoudnessEnhancerTargetGain(rounded);
                   },
-                  knobLabel: const Text(
+                  knobLabel: Text(
                     'Gain',
-                    style: TextStyle(color: Colors.white),
+                    style: TextStyle(color: textColor),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -303,7 +318,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
               const SizedBox(height: 8),
               Text(
                 'Gain: ${_settings.loudnessEnhancerTargetGain.toStringAsFixed(1)} dB',
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: textColor),
               ),
             ],
           ),
@@ -312,6 +327,10 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   }
 
   Widget _buildSpeedAndPitchControl() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       child: Row(
@@ -327,7 +346,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                   minValue: 0.5,
                   maxValue: 2.0,
                   size: 140,
-                  markerColor: appbarcolor,
+                  markerColor: primaryColor,
                   knobvalue: _settings.defaultPlaybackSpeed,
                   showKnobLabels: false,
                   maxRotationAngle: 180,
@@ -341,16 +360,13 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     await _audioService.player.setSpeed(rounded);
                     await _settings.setDefaultPlaybackSpeed(rounded);
                   },
-                  knobLabel: const Text(
-                    'Speed',
-                    style: TextStyle(color: Colors.white),
-                  ),
+                  knobLabel: Text('Speed', style: TextStyle(color: textColor)),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Speed: ${_settings.defaultPlaybackSpeed.toStringAsFixed(2)}x',
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: textColor),
               ),
             ],
           ),
@@ -363,7 +379,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                 child: FlutterOKnob(
                   minValue: 0.5,
                   maxValue: 2.0,
-                  markerColor: appbarcolor,
+                  markerColor: primaryColor,
                   size: 140,
                   knobvalue: _settings.pitch,
                   showKnobLabels: false,
@@ -378,16 +394,13 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     await _audioService.player.setPitch(rounded);
                     await _settings.setPitch(rounded);
                   },
-                  knobLabel: const Text(
-                    'Pitch',
-                    style: TextStyle(color: Colors.white),
-                  ),
+                  knobLabel: Text('Pitch', style: TextStyle(color: textColor)),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Pitch: ${_settings.pitch.toStringAsFixed(2)}x',
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: textColor),
               ),
             ],
           ),

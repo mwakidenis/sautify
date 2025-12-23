@@ -87,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return ChangeNotifierProvider(
       create: (context) => HomeNotifier(),
       child: Scaffold(
-        backgroundColor: bgcolor,
+        // backgroundColor: bgcolor,
         appBar: AppBar(
           leading: Padding(
             padding: const EdgeInsets.all(8.0),
@@ -122,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> {
               color: Colors.white,
             ),
           ),
-          backgroundColor: bgcolor,
+          // backgroundColor: bgcolor,
           actions: [
             Padding(
               padding: const EdgeInsets.all(8.0),
@@ -205,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     SizedBox(height: 16),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: appbarcolor,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
                       ),
                       onPressed: () => homeNotifier.fetchHomeSections(),
                       child: Text('Retry'),
@@ -219,6 +219,8 @@ class _HomeScreenState extends State<HomeScreen> {
             // content is served from cache or empty fallback.
             _maybeShowInfoSnack(context, homeNotifier);
 
+            final colorScheme = Theme.of(context).colorScheme;
+
             return ExpressiveRefreshIndicator(
               indicatorConstraints: BoxConstraints(
                 maxHeight: 80,
@@ -228,8 +230,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               //     backgroundColor: appbarcolor.withAlpha(200),
               elevation: 1,
-              color: appbarcolor.withAlpha(200),
-              backgroundColor: cardcolor.withAlpha(100),
+              color: colorScheme.primary.withAlpha(200),
+              backgroundColor: colorScheme.surfaceContainerHighest.withAlpha(
+                100,
+              ),
               onRefresh: () => homeNotifier.refresh(),
               child: Skeletonizer(
                 enabled:
@@ -237,8 +241,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     !homeNotifier.isInitialized ||
                     homeNotifier.sections.isEmpty,
                 effect: ShimmerEffect(
-                  baseColor: cardcolor,
-                  highlightColor: cardcolor.withAlpha(153), // 60% opacity
+                  baseColor: colorScheme.surfaceContainerHighest,
+                  highlightColor: colorScheme.surfaceContainerHighest.withAlpha(
+                    153,
+                  ), // 60% opacity
                   duration: const Duration(milliseconds: 800),
                 ),
                 child: ListView.builder(
@@ -293,7 +299,9 @@ class _HomeScreenState extends State<HomeScreen> {
         behavior: SnackBarBehavior.floating,
         backgroundColor: isFallback
             ? Colors.orange.withAlpha((255 * 0.9).toInt())
-            : appbarcolor.withAlpha((255 * 0.9).toInt()),
+            : Theme.of(
+                context,
+              ).colorScheme.primary.withAlpha((255 * 0.9).toInt()),
         action: SnackBarAction(
           label: 'Retry',
           onPressed: () =>
@@ -469,10 +477,16 @@ class _HomeScreenState extends State<HomeScreen> {
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(24)),
           // margin: const EdgeInsets.only(right: 12),
           child: Material(
-            color: cardcolor,
-            borderRadius: BorderRadius.circular(4),
+            color: Theme.of(context).colorScheme.primary.withAlpha(30),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.primary.withAlpha(50),
+                width: 1,
+              ),
+            ),
             child: InkWell(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(12),
               onTap: isBusy
                   ? null
                   : () {
@@ -501,12 +515,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                     child: CachedNetworkImage(
                                       imageUrl: content.thumbnailUrl,
                                       placeholder: M3Container.c7SidedCookie(
-                                        color: bgcolor.withAlpha(50),
+                                        color: Theme.of(
+                                          context,
+                                        ).scaffoldBackgroundColor.withAlpha(50),
                                         child: LoadingIndicatorM3E(
-                                          containerColor: appbarcolor.withAlpha(
-                                            100,
-                                          ),
-                                          color: appbarcolor.withAlpha(155),
+                                          containerColor: Theme.of(
+                                            context,
+                                          ).colorScheme.primary.withAlpha(100),
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary.withAlpha(155),
                                           constraints: BoxConstraints(
                                             maxHeight: 100,
                                             maxWidth: 100,

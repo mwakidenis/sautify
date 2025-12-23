@@ -462,7 +462,7 @@ packages:
     source: hosted
     version: "4.6.0"
   intl:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       name: intl
       sha256: "3df61194eb431efc39c4ceba583b95633a403f46c9fd341e550ce0bfa50e9aa5"
@@ -1229,5 +1229,5 @@ packages:
     source: hosted
     version: "3.0.5"
 sdks:
-  dart: ">=3.10.0 <4.0.0"
+  dart: ">=3.9.0 <4.0.0"
   flutter: ">=3.35.0"

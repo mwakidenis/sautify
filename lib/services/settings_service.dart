@@ -43,6 +43,7 @@ class SettingsService extends ChangeNotifier {
   static const _kBassBoostEnabled = 'bass_boost_enabled';
   static const _kBassBoostStrength = 'bass_boost_strength';
   static const _kSkipSilenceEnabled = 'skip_silence_enabled';
+  static const _kDynamicThemeEnabled = 'dynamic_theme_enabled';
 
   // Defaults
   bool duckOnInterruption = true;
@@ -71,6 +72,7 @@ class SettingsService extends ChangeNotifier {
   bool bassBoostEnabled = false;
   int bassBoostStrength = 0;
   bool skipSilenceEnabled = false;
+  bool dynamicThemeEnabled = false;
 
   bool get isReady => _ready;
 
@@ -112,6 +114,8 @@ class SettingsService extends ChangeNotifier {
     bassBoostStrength = _prefs.getInt(_kBassBoostStrength) ?? bassBoostStrength;
     skipSilenceEnabled =
         _prefs.getBool(_kSkipSilenceEnabled) ?? skipSilenceEnabled;
+    dynamicThemeEnabled =
+        _prefs.getBool(_kDynamicThemeEnabled) ?? dynamicThemeEnabled;
     final loadedBands = _prefs.getString(_kEqualizerBands);
     if (loadedBands != null) {
       try {
@@ -277,6 +281,12 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setDynamicThemeEnabled(bool value) async {
+    dynamicThemeEnabled = value;
+    await _prefs.setBool(_kDynamicThemeEnabled, value);
+    notifyListeners();
+  }
+
   Future<void> resetToDefaults() async {
     duckOnInterruption = true;
     duckVolume = 0.5;
@@ -298,6 +308,7 @@ class SettingsService extends ChangeNotifier {
     bassBoostEnabled = false;
     bassBoostStrength = 0;
     skipSilenceEnabled = false;
+    dynamicThemeEnabled = false;
 
     await _prefs.setBool(_kDuckOnInterruption, duckOnInterruption);
     await _prefs.setDouble(_kDuckVolume, duckVolume);
@@ -323,6 +334,7 @@ class SettingsService extends ChangeNotifier {
     await _prefs.setBool(_kBassBoostEnabled, bassBoostEnabled);
     await _prefs.setInt(_kBassBoostStrength, bassBoostStrength);
     await _prefs.setBool(_kSkipSilenceEnabled, skipSilenceEnabled);
+    await _prefs.setBool(_kDynamicThemeEnabled, dynamicThemeEnabled);
 
     notifyListeners();
   }

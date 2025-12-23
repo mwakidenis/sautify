@@ -14,7 +14,7 @@ Sautify "`Sauti`: A swahili word meaning  sound/voice" is a fast, lightweight mu
   <img src="screenshots/6.jpg" width="150" />
 </p>
 
-We source  music from YouTube music, ensuring a vast library of tracks at your fingertips and  webscraping  music at realtime from various sources.
+We source  music from scraping online sources ensuring a vast library of tracks at your fingertips without the bloat of traditional apps.
 
 ## Why Sautify
 
@@ -23,6 +23,11 @@ We source  music from YouTube music, ensuring a vast library of tracks at your f
 - You’re in control: Play what you want—single tracks, albums, or playlists—with a smart queue that just makes sense.
 - Looks as good as it sounds: A dynamic player with backgrounds that match your album art.
 - Light and reliable: Small footprint, responsive UI, and smooth playback.
+- Privacy focused: No accounts, no tracking, just pure listening.
+- Offline mode: Download your favorite tracks and listen without internet connection.
+- No tracking ads: Enjoy uninterrupted music without intrusive advertisements.
+- No streaming limits: Listen to as much music as you want without restrictions.
+- No strings attached: Completely free to use, no tracking, with no hidden fees or subscriptions.
 
 ## What you can do
 
@@ -45,6 +50,9 @@ We source  music from YouTube music, ensuring a vast library of tracks at your f
 
 Sautify is built to run great on modern Android devices. iOS support is planned. Releases may be shared periodically for testing (when a new issue arises or feature request).
 
+Report the issues you encounter or suggest features on the [GitHub Issues page](https://github.com/wambugu/sautify/issues).
+Though stable releases are prioritized, beta versions may be shared for testing new features until we reach `v1.0.0`. Expect a consistent stream of updates and improvements.
+
 ## Privacy
 
 Sautify is designed with a user‑first mindset. It avoids unnecessary data collection and respects your listening.
@@ -57,7 +65,7 @@ Have an idea, found a bug, or want to shape what comes next? Open an issue or sh
 ## Known Issues
 
 - Lyrics may not always sync perfectly with the music or they may be unavailable or even wrong.
-- Slow network connections can lead to delays in loading music or lyrics that's obvious.
+- Slow network connections can lead to delays in loading music or lyrics—that's obvious.
 
 ## Contributing
 
@@ -65,14 +73,27 @@ We welcome contributions to Sautify! Whether it's reporting bugs, suggesting fea
 
 ### How to Contribute
 
-1. **Report Issues**: If you encounter a bug or have a feature request, please open an issue on our GitHub repository.
-2. **Code Contributions**: If you'd like to contribute code:
+1. __Report Issues__: If you encounter a bug or have a feature request, please open an issue on our GitHub repository.
+2. __Code Contributions__: If you'd like to contribute code:
    - Fork the repository.
    - Create a new branch for your feature or bug fix.
    - Make your changes and commit them with clear messages.
    - Submit a pull request for review.
-3. **Review Process**: All contributions will be reviewed by the maintainers. Please be patient as we ensure quality and consistency.
+3. __Review Process__: All contributions will be reviewed by the maintainers. Please be patient as we ensure quality and consistency.
 
 > `Leave a star 🌟` if you like Sautify!
 
 — Enjoy the music.
+
+# Legal Disclaimer
+
+```
+Sautify does not possess or maintain any association with the songs and other content accessible through the app.
+All songs and other content are the property of their respective owners and are safeguarded by copyright law.
+Sautify holds no liability for any copyright infringement or other violations of intellectual property rights
+that may arise from the use of the songs and other content accessible through the app.
+Sautify employs third-party plugins and assumes no responsibility for any harm or damage to the respective owners or
+any other parties resulting from the utilization of the songs and other content through the third-party plugins.
+By using the app, you consent to utilizing the songs and other content exclusively for personal,
+non-commercial purposes and in accordance with all applicable laws and regulations.
+```

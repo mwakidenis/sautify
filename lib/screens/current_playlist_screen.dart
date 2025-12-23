@@ -9,7 +9,6 @@ import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:mini_music_visualizer/mini_music_visualizer.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
 
@@ -27,19 +26,23 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: bgcolor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: bgcolor,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           onPressed: () => Navigator.of(context).pop(),
-          icon: Icon(Icons.arrow_back, color: iconcolor),
+          icon: Icon(
+            Icons.arrow_back,
+            color: Theme.of(context).iconTheme.color,
+          ),
         ),
         title: Text(
           'Now Playing',
           style: TextStyle(
-            color: txtcolor,
+            color: Theme.of(context).textTheme.bodyLarge?.color,
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
@@ -56,7 +59,9 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                 },
                 icon: Icon(
                   Icons.shuffle,
-                  color: isShuffled ? appbarcolor : iconcolor.withAlpha(180),
+                  color: isShuffled
+                      ? colorScheme.primary
+                      : Theme.of(context).iconTheme.color?.withAlpha(180),
                 ),
               );
             },
@@ -67,16 +72,16 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
             builder: (context, _) {
               final mode = widget.audioService.loopMode;
               IconData icon;
-              Color color;
+              Color? color;
               if (mode == LoopMode.one) {
                 icon = Icons.repeat_one;
-                color = appbarcolor;
+                color = colorScheme.primary;
               } else if (mode == LoopMode.all) {
                 icon = Icons.repeat;
-                color = appbarcolor;
+                color = colorScheme.primary;
               } else {
                 icon = Icons.repeat;
-                color = iconcolor.withAlpha(180);
+                color = Theme.of(context).iconTheme.color?.withAlpha(180);
               }
               return IconButton(
                 onPressed: () {
@@ -100,7 +105,9 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                   child: Text(
                     '$count songs',
                     style: TextStyle(
-                      color: txtcolor.withAlpha(180),
+                      color: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.color?.withAlpha(180),
                       fontSize: 14,
                     ),
                   ),
@@ -123,13 +130,15 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                   Icon(
                     Icons.queue_music,
                     size: 64,
-                    color: iconcolor.withAlpha(100),
+                    color: Theme.of(context).iconTheme.color?.withAlpha(100),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'No songs in playlist',
                     style: TextStyle(
-                      color: txtcolor.withAlpha(180),
+                      color: Theme.of(
+                        context,
+                      ).textTheme.bodyLarge?.color?.withAlpha(180),
                       fontSize: 18,
                     ),
                   ),
@@ -147,9 +156,12 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
               padding: const EdgeInsets.all(16),
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.transparent,
+                  color: colorScheme.primary.withAlpha(30),
                   borderRadius: BorderRadius.circular(16),
-                  // border: Border.all(color: txtcolor.withAlpha(40), width: 1),
+                  border: Border.all(
+                    color: colorScheme.primary.withAlpha(50),
+                    width: 1,
+                  ),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: ListView.builder(
@@ -169,7 +181,7 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
 
                     return Container(
                       color: isCurrentTrack
-                          ? appbarcolor.withAlpha(30)
+                          ? colorScheme.primary.withAlpha(30)
                           : Colors.transparent,
                       child: InkWell(
                         onTap: () async {
@@ -223,7 +235,7 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                         height: 48,
                                         child: Center(
                                           child: LoadingIndicatorM3E(
-                                            color: appbarcolor,
+                                            color: colorScheme.primary,
                                             constraints: const BoxConstraints(
                                               maxWidth: 24,
                                               maxHeight: 24,
@@ -235,11 +247,12 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                     : (track.thumbnailUrl != null
                                           ? CachedNetworkImage(
                                               placeholder: M3Container.square(
-                                                color: bgcolor.withAlpha(155),
+                                                color: Theme.of(context)
+                                                    .scaffoldBackgroundColor
+                                                    .withAlpha(155),
                                                 child: LoadingIndicatorM3E(
-                                                  color: appbarcolor.withAlpha(
-                                                    155,
-                                                  ),
+                                                  color: colorScheme.primary
+                                                      .withAlpha(155),
                                                 ),
                                               ),
                                               imageUrl: track.thumbnailUrl!,
@@ -250,13 +263,18 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                               height: 48,
                                               errorWidget: Icon(
                                                 Icons.music_note,
-                                                color: iconcolor.withAlpha(180),
+                                                color: Theme.of(context)
+                                                    .iconTheme
+                                                    .color
+                                                    ?.withAlpha(180),
                                                 size: 24,
                                               ),
                                             )
                                           : Icon(
                                               Icons.music_note,
-                                              color: iconcolor.withAlpha(180),
+                                              color: Theme.of(
+                                                context,
+                                              ).iconTheme.color?.withAlpha(180),
                                               size: 24,
                                             )),
                               ),
@@ -273,8 +291,10 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                       track.title,
                                       style: TextStyle(
                                         color: isCurrentTrack
-                                            ? appbarcolor
-                                            : txtcolor,
+                                            ? colorScheme.primary
+                                            : Theme.of(
+                                                context,
+                                              ).textTheme.bodyLarge?.color,
                                         fontSize: 15,
                                         fontWeight: isCurrentTrack
                                             ? FontWeight.bold
@@ -291,8 +311,13 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                             track.artist,
                                             style: TextStyle(
                                               color: isCurrentTrack
-                                                  ? appbarcolor.withAlpha(180)
-                                                  : txtcolor.withAlpha(180),
+                                                  ? colorScheme.primary
+                                                        .withAlpha(180)
+                                                  : Theme.of(context)
+                                                        .textTheme
+                                                        .bodyMedium
+                                                        ?.color
+                                                        ?.withAlpha(180),
                                               fontSize: 13,
                                             ),
                                             maxLines: 1,
@@ -304,7 +329,11 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                           Text(
                                             _formatDuration(track.duration!),
                                             style: TextStyle(
-                                              color: txtcolor.withAlpha(120),
+                                              color: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.color
+                                                  ?.withAlpha(120),
                                               fontSize: 12,
                                             ),
                                           ),
@@ -320,7 +349,7 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                               // Trailing: now-playing indicator + index
                               if (isCurrentTrack)
                                 MiniMusicVisualizer(
-                                  color: appbarcolor.withAlpha(250),
+                                  color: colorScheme.primary.withAlpha(250),
                                   width: 4,
                                   height: 15,
                                   animate: true,
@@ -330,8 +359,12 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                                 '${index + 1}',
                                 style: TextStyle(
                                   color: isCurrentTrack
-                                      ? appbarcolor
-                                      : txtcolor.withAlpha(120),
+                                      ? colorScheme.primary
+                                      : Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.color
+                                            ?.withAlpha(120),
                                   fontSize: 13,
                                   fontWeight: isCurrentTrack
                                       ? FontWeight.bold

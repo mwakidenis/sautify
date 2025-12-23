@@ -589,8 +589,14 @@ class AudioPlayerService extends ChangeNotifier {
     // Listen to player events
     _player.currentIndexStream.listen((audioIndex) {
       if (audioIndex != null) {
-        // Map effective sequence index back to playlist index (shuffle-aware)
-        final newIndex = _sequenceIndexToPlaylistIndex(audioIndex);
+        // audioIndex is the index in the ConcatenatingAudioSource (child index).
+        // It is NOT the sequence index (playback order), so we don't need to map through shuffle indices.
+        // We simply map the child index to our internal playlist index.
+        int newIndex = _currentIndex;
+        if (audioIndex >= 0 && audioIndex < _childToPlaylistIndex.length) {
+          newIndex = _childToPlaylistIndex[audioIndex];
+        }
+
         if (newIndex != _currentIndex) {
           _currentIndex = newIndex;
           _currentTrackController.add(currentTrack);
@@ -793,6 +799,15 @@ class AudioPlayerService extends ChangeNotifier {
       // Keep progress tracking for telemetry but don't show it
       // Progress overlay has been disabled - songs stream in background
       loadingProgress.value = null;
+
+      // NEW: Offline Mode Pipeline
+      // If explicitly playing downloads or offline mode is enabled, use the dedicated offline pipeline.
+      // This bypasses network resolution, caching, and complex isolate logic.
+      final settings = SettingsService();
+      if (sourceType == 'DOWNLOADS' || settings.offlineMode) {
+        await _loadOfflinePlaylist(requestId: requestId, autoPlay: autoPlay);
+        return true;
+      }
 
       final quality = _getPreferredQuality();
       if (resolveAllBeforeFeeding) {
@@ -1007,6 +1022,77 @@ class AudioPlayerService extends ChangeNotifier {
     }
 
     if (!pruned) notifyListeners();
+  }
+
+  /// Dedicated pipeline for offline playback.
+  /// Directly loads local files into ConcatenatingAudioSource without network checks.
+  Future<void> _loadOfflinePlaylist({
+    required int requestId,
+    required bool autoPlay,
+  }) async {
+    final children = <AudioSource>[];
+    final readyIndices = <int>[];
+
+    for (int i = 0; i < _playlist.length; i++) {
+      final t = _playlist[i];
+      // For offline playback, we expect a valid local path in streamUrl
+      if (t.streamUrl == null) continue;
+
+      // Mark as ready/available since it's local
+      if (!t.isReady) {
+        _playlist[i] = t.copyWith(isAvailable: true, isLocal: true);
+      }
+
+      children.add(
+        AudioSource.uri(
+          _toPlayableUri(t.streamUrl!, isLocal: true),
+          tag: MediaItem(
+            id: t.videoId,
+            title: t.title,
+            artist: t.artist,
+            duration: t.duration,
+            artUri: t.thumbnailUrl != null
+                ? Uri.tryParse(t.thumbnailUrl!)
+                : null,
+            extras: {'videoId': t.videoId, 'isLocal': true},
+          ),
+        ),
+      );
+      readyIndices.add(i);
+    }
+
+    if (children.isEmpty) {
+      _setPreparing(false);
+      return;
+    }
+
+    _childToPlaylistIndex = List<int>.from(readyIndices);
+    final initChildIndex = _getAudioSourceIndex(
+      _currentIndex,
+    ).clamp(0, children.length - 1);
+
+    try {
+      await _player.setAudioSource(
+        ConcatenatingAudioSource(
+          children: children,
+          useLazyPreparation: true,
+          shuffleOrder: DefaultShuffleOrder(),
+        ),
+        initialIndex: initChildIndex,
+        initialPosition: Duration.zero,
+      );
+
+      if (autoPlay) await _player.play();
+
+      _currentTrackController.add(_playlist[_currentIndex]);
+      _emitTrackInfo(force: true);
+    } catch (e) {
+      debugPrint('Error loading offline playlist: $e');
+    } finally {
+      if (requestId == _loadRequestId) {
+        _setPreparing(false);
+      }
+    }
   }
 
   // Resolve all tracks' stream URLs and metadata before building audio source
@@ -1517,6 +1603,9 @@ class AudioPlayerService extends ChangeNotifier {
   Future<void> _ensureTrackReady(int index, {int? requestId}) async {
     if (index >= _playlist.length) return;
 
+    // Skip network fetch for local files
+    if (_playlist[index].isLocal) return;
+
     final track = _playlist[index];
     if (!track.isReady) {
       final result = await _streamingService.fetchStreamingData(
@@ -1626,6 +1715,9 @@ class AudioPlayerService extends ChangeNotifier {
     bool preservePosition = true,
     int? requestId,
   }) async {
+    // Skip rebuilds for offline mode to prevent stuttering/stopping
+    if (_sourceType == 'DOWNLOADS' || SettingsService().offlineMode) return;
+
     // If called from a superseded load, abort early
     if (requestId != null && requestId != _loadRequestId) return;
 

@@ -30,7 +30,6 @@ import 'package:on_audio_query/on_audio_query.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:progress_indicator_m3e/progress_indicator_m3e.dart';
 import 'package:provider/provider.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/db/library_store.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/models/track_info.dart';
@@ -82,7 +81,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   //  List<AudioInput> _availableDevices = [];
 
   // Dynamic background colors based on current artwork
-  List<Color> _bgColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+  List<Color> _bgColors = [Colors.black, Colors.black, Colors.black];
   String? _lastArtworkUrl;
   int? _lastLocalId;
   Uint8List? _localArtworkBytes;
@@ -141,7 +140,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) setState(() => isLiked = fav);
     });
     // _initAudioOutput();
-  } /*
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Initialize with theme color if it's still default black and we have no artwork yet
+    if (_bgColors[0] == Colors.black &&
+        _bgColors[1] == Colors.black &&
+        _lastArtworkUrl == null &&
+        _localArtworkBytes == null) {
+      final scaffoldColor = Theme.of(context).scaffoldBackgroundColor;
+      setState(() {
+        _bgColors = [scaffoldColor.withAlpha(200), scaffoldColor, Colors.black];
+      });
+    }
+  }
+  /*
 
   Future<void> _initAudioOutput() async {
     // Set up listener for audio device changes
@@ -241,7 +256,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget build(BuildContext context) {
     late bool eq = _settings.equalizerEnabled;
     return Scaffold(
-      backgroundColor: bgcolor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: StreamBuilder<TrackInfo>(
         // Use the throttled Rx-composed TrackInfo stream for consistent UI updates
         stream: _audioService.trackInfo$,
@@ -454,8 +469,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (bytes == null || bytes.isEmpty) {
         // Reset to default if no artwork
         if (mounted) {
+          final scaffoldColor = Theme.of(context).scaffoldBackgroundColor;
           setState(() {
-            _bgColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+            _bgColors = [
+              scaffoldColor.withAlpha(200),
+              scaffoldColor,
+              Colors.black,
+            ];
           });
         }
         return;
@@ -526,9 +546,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         bgcolor,
         Colors.black,
       ]);*/
-      setState(
-        () => _bgColors = [bgcolor.withAlpha(200), bgcolor, Colors.black],
-      );
+      setState(() {
+        final scaffoldColor = Theme.of(context).scaffoldBackgroundColor;
+        _bgColors = [scaffoldColor.withAlpha(200), scaffoldColor, Colors.black];
+      });
     }
   }
 
@@ -595,7 +616,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       children: [
         IconButton(
           onPressed: () => Navigator.pop(context),
-          icon: Icon(Icons.keyboard_arrow_down, color: iconcolor, size: 32),
+          icon: Icon(
+            Icons.keyboard_arrow_down,
+            color: Theme.of(context).iconTheme.color,
+            size: 32,
+          ),
         ),
         Expanded(
           child: Column(
@@ -608,7 +633,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: txtcolor.withAlpha(180),
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.color?.withAlpha(180),
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
                   letterSpacing: 1,
@@ -622,7 +649,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: txtcolor,
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                   ),
@@ -638,8 +665,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
             );
           },
           icon: eq
-              ? Icon(Icons.equalizer_rounded, color: appbarcolor, size: 28)
-              : Icon(Icons.equalizer_rounded, color: iconcolor, size: 28),
+              ? Icon(
+                  Icons.equalizer_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 28,
+                )
+              : Icon(
+                  Icons.equalizer_rounded,
+                  color: Theme.of(context).iconTheme.color,
+                  size: 28,
+                ),
         ),
         /* IconButton(
           onPressed: () {},
@@ -754,8 +789,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     : CachedNetworkImage(
                         placeholder: M3Container.c7SidedCookie(
                           child: LoadingIndicatorM3E(
-                            containerColor: bgcolor.withAlpha(100),
-                            color: appbarcolor.withAlpha(155),
+                            containerColor: Theme.of(
+                              context,
+                            ).scaffoldBackgroundColor.withAlpha(100),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primary.withAlpha(155),
                             constraints: BoxConstraints(
                               maxWidth: 100,
                               maxHeight: 100,
@@ -792,12 +831,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
             const Color(0xFF00FFFF), // Cyan
             const Color(0xFFFFFF00), // Yellow
             const Color(0xFF0080FF), // Blue
-            cardcolor,
+            Theme.of(context).cardColor,
           ],
         ),
       ),
       child: Center(
-        child: Icon(Icons.music_note, size: 80, color: txtcolor.withAlpha(200)),
+        child: Icon(
+          Icons.music_note,
+          size: 80,
+          color: Theme.of(context).textTheme.bodyLarge?.color?.withAlpha(200),
+        ),
       ),
     );
   }
@@ -819,7 +862,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         startAfter: Duration(seconds: 10),
                         pauseAfterRound: Duration(seconds: 5),
                         style: TextStyle(
-                          color: txtcolor,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
 
@@ -831,7 +874,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: txtcolor,
+                          color: Theme.of(context).textTheme.bodyLarge?.color,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                         ),
@@ -841,7 +884,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Text(
                 artist,
                 style: TextStyle(
-                  color: txtcolor.withAlpha(180),
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.color?.withAlpha(180),
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
@@ -851,7 +896,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
         IconButton(
           onPressed: _downloadCurrentTrack,
-          icon: Icon(Icons.download_rounded, color: iconcolor, size: 28),
+          icon: Icon(
+            Icons.download_rounded,
+            color: Theme.of(context).iconTheme.color,
+            size: 28,
+          ),
         ),
         IconButton(
           onPressed: () async {
@@ -885,7 +934,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           icon: Icon(
             isLiked ? Icons.favorite : Icons.favorite_border_rounded,
-            color: isLiked ? Colors.red : iconcolor,
+            color: isLiked ? Colors.red : Theme.of(context).iconTheme.color,
             size: 28,
           ),
         ),
@@ -918,8 +967,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ignoring: true,
                       child: SliderTheme(
                         data: SliderTheme.of(context).copyWith(
-                          disabledActiveTrackColor: txtcolor.withAlpha(70),
-                          disabledInactiveTrackColor: txtcolor.withAlpha(30),
+                          disabledActiveTrackColor: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.color?.withAlpha(70),
+                          disabledInactiveTrackColor: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.color?.withAlpha(30),
                           disabledThumbColor: Colors.transparent,
                           thumbShape: const RoundSliderThumbShape(
                             enabledThumbRadius: 0,
@@ -945,9 +998,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             : 0.0;
                         return SliderTheme(
                           data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: appbarcolor,
-                            inactiveTrackColor: appbarcolor.withAlpha(50),
-                            thumbColor: txtcolor,
+                            activeTrackColor: Theme.of(
+                              context,
+                            ).colorScheme.primary,
+                            inactiveTrackColor: Theme.of(
+                              context,
+                            ).colorScheme.primary.withAlpha(50),
+                            thumbColor: Theme.of(
+                              context,
+                            ).textTheme.bodyLarge?.color,
                             thumbShape: const RoundSliderThumbShape(
                               enabledThumbRadius: 0,
                               elevation: 0,
@@ -985,7 +1044,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     return Text(
                       _formatDuration(pos),
                       style: TextStyle(
-                        color: txtcolor.withAlpha(180),
+                        color: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.color?.withAlpha(180),
                         fontSize: 12,
                       ),
                     );
@@ -994,7 +1055,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 Text(
                   _formatDuration(total),
                   style: TextStyle(
-                    color: txtcolor.withAlpha(180),
+                    color: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.color?.withAlpha(180),
                     fontSize: 12,
                   ),
                 ),
@@ -1010,6 +1073,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final isShuffled = info?.isShuffleEnabled ?? false;
     final loopMode = info?.loopMode ?? 'off';
     final isRepeating = loopMode != 'off';
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final iconColor =
+        Theme.of(context).iconTheme.color ??
+        Theme.of(context).colorScheme.onSurface;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1021,7 +1088,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           icon: Icon(
             Icons.shuffle,
-            color: isShuffled ? appbarcolor : iconcolor.withAlpha(180),
+            color: isShuffled ? primaryColor : iconColor.withAlpha(180),
             size: 24,
           ),
         ),
@@ -1030,7 +1097,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           onPressed: () {
             _audioService.skipToPrevious();
           },
-          icon: Icon(Icons.skip_previous, color: iconcolor, size: 32),
+          icon: Icon(Icons.skip_previous, color: iconColor, size: 32),
         ),
         // Play/Pause button
         ValueListenableBuilder<bool>(
@@ -1059,8 +1126,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             width: 32,
                             height: 32,
                             child: LoadingIndicatorM3E(
-                              containerColor: bgcolor.withAlpha(100),
-                              color: appbarcolor.withAlpha(155),
+                              containerColor: Theme.of(
+                                context,
+                              ).scaffoldBackgroundColor.withAlpha(100),
+                              color: primaryColor.withAlpha(155),
                               polygons: [
                                 MaterialShapes.sunny,
                                 MaterialShapes.cookie9Sided,
@@ -1075,7 +1144,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                     //  label: SizedBox.shrink(),
                     style: IconButton.styleFrom(
-                      backgroundColor: appbarcolor,
+                      backgroundColor: primaryColor,
                       shape: CircleBorder(),
                     ),
                   ),
@@ -1089,7 +1158,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           onPressed: () {
             _audioService.skipToNext();
           },
-          icon: Icon(Icons.skip_next, color: iconcolor, size: 32),
+          icon: Icon(Icons.skip_next, color: iconColor, size: 32),
         ),
         // Repeat button
         IconButton(
@@ -1101,7 +1170,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           icon: Icon(
             loopMode == 'one' ? Icons.repeat_one : Icons.repeat,
-            color: isRepeating ? appbarcolor : iconcolor.withAlpha(180),
+            color: isRepeating ? primaryColor : iconColor.withAlpha(180),
             size: 24,
           ),
         ),
@@ -1110,6 +1179,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildBottomControls(String title) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final iconColor =
+        Theme.of(context).iconTheme.color ??
+        Theme.of(context).colorScheme.onSurface;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1129,7 +1203,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           label: Text('Lyrics', style: TextStyle(color: txtcolor)),*/
           icon: Icon(
             _showLyrics ? Icons.lyrics : Icons.lyrics_outlined,
-            color: iconcolor.withAlpha(180),
+            color: iconColor.withAlpha(180),
           ),
           onPressed: () {
             if (_showLyrics) {
@@ -1199,7 +1273,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 pauseAfterRound: Duration(seconds: 2),
                 //  curve: Curves.linear,
                 style: TextStyle(
-                  color: appbarcolor,
+                  color: primaryColor,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1224,7 +1298,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           icon: Icon(
             Icons.queue_music,
-            color: iconcolor.withAlpha(180),
+            color: iconColor.withAlpha(180),
             size: 24,
           ),
         ),
@@ -1391,6 +1465,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildLyricsOverlay(TrackInfo? info) {
     final positionMs = (info?.position ?? Duration.zero).inMilliseconds;
     final adjustedPos = positionMs - _lyricsOffsetMs.toInt();
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor =
+        Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
 
     // Schedule auto-scroll to the active line after build
     if (_showLyrics && !_lyricsLoading && _lyrics.isNotEmpty) {
@@ -1401,7 +1478,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     return Container(
-      color: Colors.black.withOpacity(0.55),
+      color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.95),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12.0),
@@ -1413,8 +1490,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   Text(
                     'Lyrics',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: textColor,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1426,14 +1503,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           padding: const EdgeInsets.only(right: 8.0),
                           child: Text(
                             _lyricsSource!,
-                            style: const TextStyle(
-                              color: Colors.white70,
+                            style: TextStyle(
+                              color: textColor.withOpacity(0.7),
                               fontSize: 12,
                             ),
                           ),
                         ),
                       IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
+                        icon: Icon(Icons.close, color: textColor),
                         onPressed: () => setState(() => _showLyrics = false),
                       ),
                     ],
@@ -1445,8 +1522,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: _lyricsLoading
                     ? Center(
                         child: LoadingIndicatorM3E(
-                          containerColor: bgcolor.withAlpha(100),
-                          color: appbarcolor.withAlpha(155),
+                          containerColor: Theme.of(
+                            context,
+                          ).scaffoldBackgroundColor.withAlpha(100),
+                          color: primaryColor.withAlpha(155),
                           /*   polygons: [
                             MaterialShapes.sunny,
                             MaterialShapes.cookie9Sided,
@@ -1461,7 +1540,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ? Center(
                               child: Text(
                                 _lyricsError!,
-                                style: const TextStyle(color: Colors.white70),
+                                style: TextStyle(
+                                  color: textColor.withOpacity(0.7),
+                                ),
                               ),
                             )
                           : NotificationListener<ScrollNotification>(
@@ -1489,8 +1570,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
                                         color: active
-                                            ? Colors.white
-                                            : Colors.white70,
+                                            ? textColor
+                                            : textColor.withOpacity(0.7),
                                         fontSize: active ? 18 : 14,
                                         fontWeight: active
                                             ? FontWeight.w700
@@ -1508,17 +1589,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(height: 8),
                     Text(
                       'Sync Offset: ${_lyricsOffsetMs.toInt()}ms',
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: textColor.withOpacity(0.7),
                         fontSize: 12,
                       ),
                     ),
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: appbarcolor,
-                        inactiveTrackColor: Colors.white24,
-                        thumbColor: Colors.white,
-                        overlayColor: Colors.white12,
+                        activeTrackColor: primaryColor,
+                        inactiveTrackColor: textColor.withOpacity(0.24),
+                        thumbColor: textColor,
+                        overlayColor: textColor.withOpacity(0.12),
                         thumbShape: const RoundSliderThumbShape(
                           enabledThumbRadius: 6,
                         ),
@@ -1751,22 +1832,37 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: cardcolor,
-      title: Text('Downloading...', style: TextStyle(color: txtcolor)),
+      backgroundColor: Theme.of(context).cardColor,
+      title: Text(
+        'Downloading...',
+        style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           LinearProgressIndicatorM3E(
             value: _progress,
-            trackColor: txtcolor.withAlpha(30),
-            activeColor: appbarcolor,
+            trackColor: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.color?.withAlpha(30),
+            activeColor: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 16),
-          Text(_status, style: TextStyle(color: txtcolor)),
+          Text(
+            _status,
+            style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+            ),
+          ),
           const SizedBox(height: 8),
           Text(
             widget.savePath,
-            style: TextStyle(color: txtcolor.withAlpha(150), fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.color?.withAlpha(150),
+              fontSize: 12,
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -1775,7 +1871,12 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text('Cancel', style: TextStyle(color: txtcolor)),
+          child: Text(
+            'Cancel',
+            style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+            ),
+          ),
         ),
       ],
     );

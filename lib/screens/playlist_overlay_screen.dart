@@ -13,7 +13,6 @@ import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 //  for downloads/offline storage ie when one downloads a track for offline listening not  devices files.
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/home/contents.dart';
 import 'package:sautifyv2/models/playlist_models.dart';
@@ -107,10 +106,13 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return ChangeNotifierProvider.value(
       value: _provider,
       child: Scaffold(
-        backgroundColor: bgcolor.withOpacity(0.95),
+        backgroundColor: Theme.of(
+          context,
+        ).scaffoldBackgroundColor.withOpacity(0.95),
         body: SafeArea(
           child: Consumer<PlaylistProvider>(
             builder: (context, playlistProvider, child) {
@@ -122,7 +124,12 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [bgcolor.withOpacity(0.8), bgcolor],
+                        colors: [
+                          Theme.of(
+                            context,
+                          ).scaffoldBackgroundColor.withOpacity(0.8),
+                          Theme.of(context).scaffoldBackgroundColor,
+                        ],
                       ),
                     ),
                   ),
@@ -159,7 +166,11 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
         children: [
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
-            icon: Icon(Icons.keyboard_arrow_down, color: iconcolor, size: 32),
+            icon: Icon(
+              Icons.keyboard_arrow_down,
+              color: Theme.of(context).iconTheme.color,
+              size: 32,
+            ),
           ),
           /*    Expanded(
             child: Text(
@@ -200,14 +211,16 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                       errorWidget: Icon(
                         Icons.playlist_play,
                         size: 60,
-                        color: iconcolor.withOpacity(0.6),
+                        color: Theme.of(
+                          context,
+                        ).iconTheme.color?.withOpacity(0.6),
                       ),
                     ),
                   )
                 : Icon(
                     Icons.playlist_play,
                     size: 60,
-                    color: iconcolor.withOpacity(0.6),
+                    color: Theme.of(context).iconTheme.color?.withOpacity(0.6),
                   ),
           ),
 
@@ -220,7 +233,7 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
               Text(
                 widget.playlistContent.name,
                 style: TextStyle(
-                  color: txtcolor,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
@@ -241,7 +254,8 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                         child: Text(
                           widget.playlistContent.artistName,
                           style: TextStyle(
-                            color: txtcolor.withAlpha((255 * 0.7).toInt()),
+                            color: Theme.of(context).textTheme.bodyMedium?.color
+                                ?.withAlpha((255 * 0.7).toInt()),
                             fontSize: 14,
                           ),
                           maxLines: 1,
@@ -257,14 +271,16 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: appbarcolor.withOpacity(0.5),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.primary.withOpacity(0.5),
                             width: 1,
                           ),
                         ),
                         child: Text(
                           widget.playlistContent.type.toUpperCase(),
                           style: TextStyle(
-                            color: appbarcolor,
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -348,7 +364,9 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                                 isSaved
                                     ? Icons.favorite
                                     : Icons.favorite_border,
-                                color: isSaved ? Colors.red : appbarcolor,
+                                color: isSaved
+                                    ? Colors.red
+                                    : Theme.of(context).colorScheme.primary,
                               ),
                               // label: Text(isSaved ? 'Saved' : 'Save'),
                               /*  style: OutlinedButton.styleFrom(
@@ -370,14 +388,17 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                           onPressed: () {},
                           icon: Icon(
                             Icons.download_for_offline,
-                            color: appbarcolor,
+                            color: Theme.of(context).colorScheme.primary,
                           ),
                         ),
                         // Removed Download All button
                         //shuffle button
                         IconButton(
                           onPressed: () {},
-                          icon: Icon(Icons.shuffle, color: appbarcolor),
+                          icon: Icon(
+                            Icons.shuffle,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
                         ),
                       ],
                     ),
@@ -435,7 +456,10 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                                 },
                           icon: disabled
                               ? const SizedBox.shrink()
-                              : Icon(Icons.play_arrow, color: iconcolor),
+                              : Icon(
+                                  Icons.play_arrow,
+                                  color: Theme.of(context).iconTheme.color,
+                                ),
                           /*  label: disabled
                               ? SizedBox(
                                   width: 16,
@@ -453,7 +477,9 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                               : const Text('Play'),
                               */
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: appbarcolor,
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primary,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.all(8),
                             shape: RoundedRectangleBorder(
@@ -489,7 +515,11 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
             const SizedBox(height: 8),
             Text(
               provider.error!,
-              style: TextStyle(color: txtcolor.withOpacity(0.8)),
+              style: TextStyle(
+                color: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.color?.withOpacity(0.8),
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -552,7 +582,7 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             decoration: BoxDecoration(
-              color: bgcolor.withAlpha(50),
+              color: Theme.of(context).colorScheme.primary.withAlpha(30),
               borderRadius: BorderRadius.vertical(
                 top: trackNumber == 0
                     ? const Radius.circular(33)
@@ -560,6 +590,10 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                 bottom: trackNumber == length - 1
                     ? const Radius.circular(33)
                     : const Radius.circular(6),
+              ),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary.withAlpha(50),
+                width: 1,
               ),
             ),
             /*
@@ -757,7 +791,17 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                   return SizedBox(
                     width: 24,
                     height: 24,
-                    child: ExpressiveLoadingIndicator(color: appbarcolor),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withAlpha(30),
+                        borderRadius: BorderRadius.circular(100),
+                      ),
+                      child: ExpressiveLoadingIndicator(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
                   );
                 }
                 return GestureDetector(
@@ -917,9 +961,14 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                                       child: CachedNetworkImage(
                                         imageUrl: track.thumbnailUrl!,
                                         placeholder: M3Container.c7SidedCookie(
-                                          color: bgcolor.withAlpha(50),
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary.withAlpha(30),
                                           child: ExpressiveLoadingIndicator(
-                                            color: appbarcolor.withAlpha(155),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withAlpha(155),
                                             constraints: BoxConstraints(
                                               maxHeight: 100,
                                               maxWidth: 100,
@@ -935,10 +984,14 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                                     )
                                   : Center(
                                       child: M3Container.c7SidedCookie(
-                                        color: bgcolor.withAlpha(50),
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary.withAlpha(30),
                                         child: Icon(
                                           Icons.music_note,
-                                          color: iconcolor.withAlpha(155),
+                                          color: Theme.of(
+                                            context,
+                                          ).iconTheme.color?.withAlpha(155),
                                         ),
                                       ),
                                     ),
@@ -950,7 +1003,7 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                     title: Text(
                       track.title,
                       style: TextStyle(
-                        color: txtcolor,
+                        color: Theme.of(context).textTheme.bodyLarge?.color,
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                       ),
@@ -960,7 +1013,9 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                     subtitle: Text(
                       video.author,
                       style: TextStyle(
-                        color: txtcolor.withAlpha(178),
+                        color: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.color?.withAlpha(178),
                         fontSize: 12,
                       ),
                     ),
@@ -968,7 +1023,11 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
                         ? Text(
                             _formatDuration(video.duration!),
                             style: TextStyle(
-                              color: txtcolor.withAlpha((255 * 0.5).toInt()),
+                              color: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.color
+                                  ?.withAlpha((255 * 0.5).toInt()),
                               fontSize: 12,
                             ),
                           )
@@ -989,8 +1048,12 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: cardcolor,
+        color: Theme.of(context).colorScheme.primary.withAlpha(30),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary.withAlpha(50),
+          width: 1,
+        ),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.all(12),
@@ -999,13 +1062,13 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
           height: 60,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            color: cardcolor.withOpacity(0.7),
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
           ),
         ),
         title: Container(
           height: 16,
           decoration: BoxDecoration(
-            color: cardcolor.withOpacity(0.7),
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
@@ -1017,7 +1080,7 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
               height: 12,
               width: 100,
               decoration: BoxDecoration(
-                color: cardcolor.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -1026,13 +1089,16 @@ class _PlaylistOverlayScreenState extends State<PlaylistOverlayScreen> {
               height: 10,
               width: 60,
               decoration: BoxDecoration(
-                color: cardcolor.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
           ],
         ),
-        trailing: Icon(Icons.play_arrow, color: cardcolor.withOpacity(0.7)),
+        trailing: Icon(
+          Icons.play_arrow,
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+        ),
       ),
     );
   }

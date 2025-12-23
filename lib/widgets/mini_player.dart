@@ -1,3 +1,5 @@
+import 'dart:io';
+
 /*
 Copyright (c) 2025 Wambugu Kinyua
 Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
@@ -8,8 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
+import 'package:on_audio_query/on_audio_query.dart';
 import 'package:provider/provider.dart';
-import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/models/track_info.dart';
 import 'package:sautifyv2/providers/set_dynamic_colors.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
@@ -27,6 +29,12 @@ class MiniPlayer extends StatefulWidget {
 class _MiniPlayerState extends State<MiniPlayer> {
   bool _initialReady = false; // becomes true when first track metadata is ready
   String? _lastProcessedUrl;
+  int? _lastProcessedId;
+
+  // Cache for artwork widget to prevent flickering
+  Widget? _cachedArtwork;
+  String? _cachedArtworkUrlKey;
+  int? _cachedArtworkIdKey;
 
   @override
   Widget build(BuildContext context) {
@@ -70,19 +78,36 @@ class _MiniPlayerState extends State<MiniPlayer> {
             final currentTrack = trackInfo!.track!;
             final progress = trackInfo.progress;
 
-            if (currentTrack.thumbnailUrl != _lastProcessedUrl) {
+            // Logic to update colors
+            bool shouldUpdateColors = false;
+            if (currentTrack.isLocal && currentTrack.localId != null) {
+              if (currentTrack.localId != _lastProcessedId) {
+                shouldUpdateColors = true;
+                _lastProcessedId = currentTrack.localId;
+                _lastProcessedUrl = null;
+              }
+            } else if (currentTrack.thumbnailUrl != _lastProcessedUrl) {
+              shouldUpdateColors = true;
               _lastProcessedUrl = currentTrack.thumbnailUrl;
+              _lastProcessedId = null;
+            }
+
+            if (shouldUpdateColors) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
-                  if (currentTrack.thumbnailUrl != null &&
+                  if (currentTrack.isLocal && currentTrack.localId != null) {
+                    context.read<SetColors>().getColorFromLocalId(
+                      currentTrack.localId!,
+                    );
+                  } else if (currentTrack.thumbnailUrl != null &&
                       currentTrack.thumbnailUrl!.isNotEmpty) {
                     context.read<SetColors>().getColor(
                       currentTrack.thumbnailUrl!,
                     );
                   } else {
                     context.read<SetColors>().setColors([
-                      bgcolor.withAlpha(200),
-                      bgcolor,
+                      Theme.of(context).colorScheme.surface.withAlpha(200),
+                      Theme.of(context).colorScheme.surface,
                       Colors.black,
                     ]);
                   }
@@ -91,6 +116,16 @@ class _MiniPlayerState extends State<MiniPlayer> {
             }
 
             final pryColors = context.watch<SetColors>().getPrimaryColors;
+
+            // Update cached artwork if track changed
+            if (_cachedArtwork == null ||
+                _cachedArtworkIdKey != currentTrack.localId ||
+                _cachedArtworkUrlKey != currentTrack.thumbnailUrl) {
+              _cachedArtwork = _buildAlbumArt(currentTrack);
+              _cachedArtworkIdKey = currentTrack.localId;
+              _cachedArtworkUrlKey = currentTrack.thumbnailUrl;
+            }
+
             return GestureDetector(
               onTap: () {
                 Navigator.of(context).push(
@@ -105,7 +140,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                 );
               },
               child: Card(
-                color: bgcolor.withAlpha(155),
+                color: Theme.of(context).colorScheme.surface.withAlpha(155),
                 elevation: 11,
                 child: Container(
                   height: 60,
@@ -114,7 +149,14 @@ class _MiniPlayerState extends State<MiniPlayer> {
                     gradient: LinearGradient(
                       colors: pryColors.isNotEmpty
                           ? pryColors
-                          : [bgcolor.withAlpha(200), bgcolor.withAlpha(150)],
+                          : [
+                              Theme.of(
+                                context,
+                              ).colorScheme.surface.withAlpha(200),
+                              Theme.of(
+                                context,
+                              ).colorScheme.surface.withAlpha(150),
+                            ],
                       begin: Alignment.center,
                       end: Alignment.bottomCenter,
                       //  tileMode: TileMode.mirror,
@@ -125,7 +167,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
                     borderRadius: BorderRadius.circular(32),
                     boxShadow: [
                       BoxShadow(
-                        color: bgcolor.withAlpha(100),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surface.withAlpha(100),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -152,9 +196,11 @@ class _MiniPlayerState extends State<MiniPlayer> {
                             borderRadius: BorderRadius.circular(12.0),
                             child: LinearProgressIndicator(
                               value: progress,
-                              backgroundColor: iconcolor.withAlpha(100),
+                              backgroundColor: Theme.of(
+                                context,
+                              ).iconTheme.color?.withAlpha(100),
                               valueColor: AlwaysStoppedAnimation<Color>(
-                                appbarcolor,
+                                Theme.of(context).colorScheme.primary,
                               ),
                             ),
                           ),
@@ -171,38 +217,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
                               M3Container.c7SidedCookie(
                                 width: 48,
                                 height: 48,
-                                /*  decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8),
-                                  color: cardcolor,
-                                ),*/
-                                child: currentTrack.thumbnailUrl != null
-                                    ? CachedNetworkImage(
-                                        placeholder: M3Container.c7SidedCookie(
-                                          color: bgcolor.withAlpha(155),
-                                          child: LoadingIndicatorM3E(
-                                            containerColor: bgcolor.withAlpha(
-                                              100,
-                                            ),
-
-                                            color: appbarcolor.withAlpha(155),
-                                          ),
-                                        ),
-                                        imageUrl: currentTrack.thumbnailUrl!,
-                                        borderRadius: BorderRadius.circular(8),
-                                        fit: BoxFit.cover,
-                                        width: 48,
-                                        height: 48,
-                                        errorWidget: Icon(
-                                          Icons.music_note,
-                                          color: iconcolor.withAlpha(180),
-                                          size: 24,
-                                        ),
-                                      )
-                                    : Icon(
-                                        Icons.music_note,
-                                        color: iconcolor.withAlpha(180),
-                                        size: 24,
-                                      ),
+                                child:
+                                    _cachedArtwork ??
+                                    _buildAlbumArt(currentTrack),
                               ),
 
                               const SizedBox(width: 12),
@@ -216,7 +233,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                     Text(
                                       currentTrack.title,
                                       style: TextStyle(
-                                        color: txtcolor,
+                                        color: Theme.of(
+                                          context,
+                                        ).textTheme.bodyLarge?.color,
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -227,7 +246,11 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                     Text(
                                       currentTrack.artist,
                                       style: TextStyle(
-                                        color: txtcolor.withAlpha(180),
+                                        color: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.color
+                                            ?.withAlpha(180),
                                         fontSize: 12,
                                       ),
                                       maxLines: 1,
@@ -263,7 +286,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                 },
                                 icon: Icon(
                                   Icons.skip_next,
-                                  color: txtcolor,
+                                  color: Theme.of(context).iconTheme.color,
                                   size: 28,
                                 ),
                                 visualDensity: VisualDensity.compact,
@@ -299,8 +322,13 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                             width: 28,
                                             height: 28,
                                             child: LoadingIndicatorM3E(
-                                              containerColor: bgcolor,
-                                              color: appbarcolor.withAlpha(155),
+                                              containerColor: Theme.of(
+                                                context,
+                                              ).colorScheme.surface,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withAlpha(155),
                                             ),
                                           ),
                                         );
@@ -308,7 +336,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
 
                                       return IconButton(
                                         style: IconButton.styleFrom(
-                                          backgroundColor: txtcolor,
+                                          backgroundColor: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
 
                                           padding: EdgeInsets.zero,
                                           minimumSize: const Size(32, 32),
@@ -328,7 +358,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                             effectivePlaying
                                                 ? Icons.pause
                                                 : Icons.play_arrow,
-                                            color: bgcolor,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onPrimary,
                                             size: 28,
                                           ),
                                         ),
@@ -371,12 +403,88 @@ class _MiniPlayerState extends State<MiniPlayer> {
     );
   }
 
+  Widget _buildAlbumArt(dynamic currentTrack) {
+    // Handle local files with OnAudioQuery
+    if (currentTrack.isLocal && currentTrack.localId != null) {
+      return QueryArtworkWidget(
+        key: ValueKey('local_art_${currentTrack.localId}'),
+        id: currentTrack.localId!,
+        type: ArtworkType.AUDIO,
+        artworkHeight: 48,
+        artworkWidth: 48,
+        artworkFit: BoxFit.cover,
+        artworkBorder: BorderRadius.circular(8),
+        nullArtworkWidget: Icon(
+          Icons.music_note,
+          color: Theme.of(context).iconTheme.color?.withAlpha(180),
+          size: 24,
+        ),
+      );
+    }
+
+    // Handle local file paths
+    if (currentTrack.thumbnailUrl != null &&
+        (currentTrack.thumbnailUrl!.startsWith('file://') ||
+            currentTrack.thumbnailUrl!.startsWith('/') ||
+            currentTrack.thumbnailUrl!.contains('\\'))) {
+      return ClipRRect(
+        key: ValueKey('local_file_${currentTrack.thumbnailUrl}'),
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(currentTrack.thumbnailUrl!.replaceFirst('file://', '')),
+          fit: BoxFit.cover,
+          width: 48,
+          height: 48,
+          errorBuilder: (context, _, _) => Icon(
+            Icons.music_note,
+            color: Theme.of(context).iconTheme.color?.withAlpha(180),
+            size: 24,
+          ),
+        ),
+      );
+    }
+
+    // Handle remote URLs
+    if (currentTrack.thumbnailUrl != null &&
+        currentTrack.thumbnailUrl!.isNotEmpty) {
+      return CachedNetworkImage(
+        key: ValueKey('remote_art_${currentTrack.thumbnailUrl}'),
+        placeholder: M3Container.c7SidedCookie(
+          color: Theme.of(context).colorScheme.surface.withAlpha(155),
+          child: LoadingIndicatorM3E(
+            containerColor: Theme.of(
+              context,
+            ).colorScheme.surface.withAlpha(100),
+            color: Theme.of(context).colorScheme.primary.withAlpha(155),
+          ),
+        ),
+        imageUrl: currentTrack.thumbnailUrl!,
+        borderRadius: BorderRadius.circular(8),
+        fit: BoxFit.cover,
+        width: 48,
+        height: 48,
+        errorWidget: Icon(
+          Icons.music_note,
+          color: Theme.of(context).iconTheme.color?.withAlpha(180),
+          size: 24,
+        ),
+      );
+    }
+
+    // Default fallback
+    return Icon(
+      Icons.music_note,
+      color: Theme.of(context).iconTheme.color?.withAlpha(180),
+      size: 24,
+    );
+  }
+
   Widget _buildSkeletonMiniPlayer() {
     return Container(
       height: 80,
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: bgcolor,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -391,8 +499,8 @@ class _MiniPlayerState extends State<MiniPlayer> {
         effect: ShimmerEffect(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
-          baseColor: cardcolor,
-          highlightColor: cardcolor.withAlpha(160),
+          baseColor: Theme.of(context).cardColor,
+          highlightColor: Theme.of(context).cardColor.withAlpha(160),
           duration: const Duration(milliseconds: 980),
         ),
         child: Padding(
@@ -404,7 +512,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: cardcolor,
+                  color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
@@ -418,7 +526,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                     Container(
                       height: 14,
                       decoration: BoxDecoration(
-                        color: cardcolor,
+                        color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -427,7 +535,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                       height: 12,
                       width: 120,
                       decoration: BoxDecoration(
-                        color: cardcolor.withAlpha(180),
+                        color: Theme.of(context).cardColor.withAlpha(180),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -439,7 +547,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: cardcolor,
+                  color: Theme.of(context).cardColor,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -448,7 +556,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: cardcolor,
+                  color: Theme.of(context).cardColor,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -457,7 +565,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: cardcolor,
+                  color: Theme.of(context).cardColor,
                   shape: BoxShape.circle,
                 ),
               ),

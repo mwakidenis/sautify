@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_color_utilities/quantize/quantizer_celebi.dart' as mcu;
 import 'package:material_color_utilities/score/score.dart' as mcu;
+import 'package:on_audio_query/on_audio_query.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
 
@@ -33,6 +34,33 @@ class SetColors extends ChangeNotifier {
     }
   }
 
+  Future<void> getColorFromLocalId(int id) async {
+    try {
+      final OnAudioQuery audioQuery = OnAudioQuery();
+      final bytes = await audioQuery.queryArtwork(
+        id,
+        ArtworkType.AUDIO,
+        format: ArtworkFormat.JPEG,
+        size: 1000,
+        quality: 100,
+      );
+
+      if (bytes == null || bytes.isEmpty) {
+        primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+        notifyListeners();
+        return;
+      }
+
+      final colors = await _extractColorsFromBytes(bytes);
+      primaryColors = colors;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error extracting colors from local ID: $e');
+      primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+      notifyListeners();
+    }
+  }
+
   static Future<List<Color>> _updatePaletteFromArtwork(String url) async {
     try {
       final cache = ImageCacheService();
@@ -41,7 +69,15 @@ class SetColors extends ChangeNotifier {
       if (bytes == null || bytes.isEmpty) {
         return <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
       }
+      return await _extractColorsFromBytes(bytes);
+    } catch (e) {
+      debugPrint('Error in isolate color extraction: $e');
+      return <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
+    }
+  }
 
+  static Future<List<Color>> _extractColorsFromBytes(Uint8List bytes) async {
+    try {
       // Slight defer to avoid blocking transition to player screen
       // await Future<void>.delayed(const Duration(milliseconds: 40));
 
@@ -90,9 +126,8 @@ class SetColors extends ChangeNotifier {
 
       return <Color>[primary, secondary, Colors.black];
     } catch (e) {
-      debugPrint('Error in isolate color extraction: $e');
+      debugPrint('Error extracting colors from bytes: $e');
       return <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
-      // Handle errors if necessary
     }
   }
 

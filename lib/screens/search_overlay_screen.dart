@@ -159,7 +159,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
           }
 
           return Scaffold(
-            backgroundColor: bgcolor,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             resizeToAvoidBottomInset: true,
             body: SafeArea(
               child: Stack(
@@ -218,14 +218,18 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
         children: [
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
-            icon: Icon(Icons.keyboard_arrow_down, color: iconcolor, size: 32),
+            icon: Icon(
+              Icons.keyboard_arrow_down,
+              color: Theme.of(context).iconTheme.color,
+              size: 32,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Search',
               style: TextStyle(
-                color: txtcolor,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
               ),
@@ -254,9 +258,14 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 child: Container(
                   height: 52,
                   decoration: BoxDecoration(
-                    color: cardcolor,
+                    color: Theme.of(context).colorScheme.primary.withAlpha(30),
                     borderRadius: BorderRadius.circular(12),
-                    //border: Border.all(color: appbarcolor, width: 1),
+                    border: Border.all(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withAlpha(50),
+                      width: 1,
+                    ),
                   ),
                   child: TextField(
                     controller: _controller,
@@ -280,14 +289,20 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                       await _addRecent(v);
                       provider.search(v);
                     },
-                    style: TextStyle(color: txtcolor),
-                    cursorColor: appbarcolor,
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                    ),
+                    cursorColor: Theme.of(context).colorScheme.primary,
                     decoration: InputDecoration(
                       hintText: 'Search songs, artists, albums',
                       hintStyle: TextStyle(
-                        color: txtcolor.withAlpha((255 * 0.7).toInt()),
+                        color: Theme.of(context).textTheme.bodyMedium?.color
+                            ?.withAlpha((255 * 0.7).toInt()),
                       ),
-                      prefixIcon: Icon(Icons.search, color: iconcolor),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        color: Theme.of(context).iconTheme.color,
+                      ),
                       suffixIcon: provider.isLoading
                           ? Padding(
                               padding: const EdgeInsets.all(12.0),
@@ -295,9 +310,13 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                 width: 16,
                                 height: 16,
                                 child: LoadingIndicatorM3E(
-                                  containerColor: appbarcolor.withAlpha(100),
+                                  containerColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withAlpha(100),
                                   //strokeWidth: 2,
-                                  color: appbarcolor.withAlpha(155),
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withAlpha(155),
                                 ),
                               ),
                             )
@@ -361,6 +380,10 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
 
   Widget _buildRecentSection(SearchProvider provider) {
     if (_recent.isEmpty) return const SizedBox.shrink();
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor = Theme.of(context).textTheme.bodyLarge?.color;
+    final iconColor = Theme.of(context).iconTheme.color;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
       child: Column(
@@ -373,7 +396,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 Text(
                   'Recent searches',
                   style: TextStyle(
-                    color: txtcolor,
+                    color: textColor,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -381,7 +404,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 const Spacer(),
                 TextButton(
                   onPressed: _recent.isEmpty ? null : _clearRecent,
-                  child: Text('Clear', style: TextStyle(color: appbarcolor)),
+                  child: Text('Clear', style: TextStyle(color: primaryColor)),
                 ),
               ],
             ),
@@ -395,9 +418,13 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 return GestureDetector(
                   onLongPress: () => _removeRecent(q),
                   child: ActionChip(
-                    backgroundColor: cardcolor,
-                    label: Text(q, style: TextStyle(color: txtcolor)),
-                    avatar: Icon(Icons.history, color: iconcolor, size: 18),
+                    backgroundColor: primaryColor.withAlpha(30),
+                    side: BorderSide(
+                      color: primaryColor.withAlpha(50),
+                      width: 1,
+                    ),
+                    label: Text(q, style: TextStyle(color: textColor)),
+                    avatar: Icon(Icons.history, color: iconColor, size: 18),
                     onPressed: () async {
                       _controller.text = q;
                       _controller.selection = TextSelection.fromPosition(
@@ -419,6 +446,10 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
   }
 
   Widget _buildSuggestionsSection() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor = Theme.of(context).textTheme.bodyLarge?.color;
+    final iconColor = Theme.of(context).iconTheme.color;
+
     return Consumer<SearchProvider>(
       builder: (context, provider, _) {
         final suggs = provider.suggestions;
@@ -434,9 +465,10 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
               runSpacing: 8,
               children: top3.map((s) {
                 return ActionChip(
-                  backgroundColor: cardcolor,
-                  label: Text(s, style: TextStyle(color: txtcolor)),
-                  avatar: Icon(Icons.search, color: iconcolor, size: 18),
+                  backgroundColor: primaryColor.withAlpha(30),
+                  side: BorderSide(color: primaryColor.withAlpha(50), width: 1),
+                  label: Text(s, style: TextStyle(color: textColor)),
+                  avatar: Icon(Icons.search, color: iconColor, size: 18),
                   onPressed: () {
                     final p = Provider.of<SearchProvider>(
                       context,
@@ -456,6 +488,10 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
 
   Widget _buildAlbumsSection() {
     final audioService = AudioPlayerService();
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor = Theme.of(context).textTheme.bodyLarge?.color;
+    final iconColor = Theme.of(context).iconTheme.color;
+
     return Consumer<SearchProvider>(
       builder: (context, provider, _) {
         if (provider.albumResults.isEmpty) {
@@ -471,7 +507,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                 child: Text(
                   'Albums',
                   style: TextStyle(
-                    color: txtcolor,
+                    color: textColor,
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
@@ -583,8 +619,12 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                               width: 120,
                               height: 200,
                               decoration: BoxDecoration(
-                                color: cardcolor,
+                                color: primaryColor.withAlpha(30),
                                 borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: primaryColor.withAlpha(50),
+                                  width: 1,
+                                ),
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.all(8.0),
@@ -608,11 +648,11 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                                         placeholder: M3Container.square(
                                                           child: LoadingIndicatorM3E(
                                                             containerColor:
-                                                                appbarcolor
+                                                                primaryColor
                                                                     .withAlpha(
                                                                       100,
                                                                     ),
-                                                            color: appbarcolor
+                                                            color: primaryColor
                                                                 .withAlpha(155),
                                                           ),
                                                         ),
@@ -624,10 +664,12 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                                       ),
                                                     )
                                                   : M3Container.square(
-                                                      color: bgcolor,
+                                                      color: Theme.of(
+                                                        context,
+                                                      ).scaffoldBackgroundColor,
                                                       child: Icon(
                                                         Icons.album,
-                                                        color: iconcolor,
+                                                        color: iconColor,
                                                       ),
                                                     ),
                                               Positioned(
@@ -738,12 +780,12 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                                       child:
                                                           LoadingIndicatorM3E(
                                                             containerColor:
-                                                                appbarcolor
+                                                                primaryColor
                                                                     .withAlpha(
                                                                       100,
                                                                     ),
                                                             //strokeWidth: 3,
-                                                            color: appbarcolor
+                                                            color: primaryColor
                                                                 .withAlpha(155),
                                                           ),
                                                     ),
@@ -765,7 +807,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                              color: txtcolor,
+                                              color: textColor,
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
@@ -777,7 +819,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
-                                                color: txtcolor.withAlpha(
+                                                color: textColor?.withAlpha(
                                                   (255 * 0.7).toInt(),
                                                 ),
                                                 fontSize: 12,
@@ -807,6 +849,8 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
 
   Widget _buildResults() {
     final audioService = AudioPlayerService();
+    final cardColor = Theme.of(context).cardColor;
+
     return Consumer<SearchProvider>(
       builder: (context, provider, _) {
         if (provider.error != null) {
@@ -827,8 +871,8 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
         return Skeletonizer(
           enabled: isLoading,
           effect: ShimmerEffect(
-            baseColor: cardcolor,
-            highlightColor: cardcolor.withAlpha((255 * 0.6).toInt()),
+            baseColor: cardColor,
+            highlightColor: cardColor.withAlpha((255 * 0.6).toInt()),
             duration: const Duration(milliseconds: 1000),
           ),
           //searched songs in list form
@@ -878,11 +922,16 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
     List<StreamingData> list,
     AudioPlayerService audioService,
   ) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final textColor = Theme.of(context).textTheme.bodyLarge?.color;
+    final iconColor = Theme.of(context).iconTheme.color;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: cardcolor,
+        color: primaryColor.withAlpha(30),
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: primaryColor.withAlpha(50), width: 1),
       ),
       /*
 
@@ -1032,7 +1081,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
             height: 60,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              color: bgcolor,
+              color: Theme.of(context).scaffoldBackgroundColor,
             ),
             child: track.thumbnailUrl != null && track.thumbnailUrl!.isNotEmpty
                 ? ClipRRect(
@@ -1040,8 +1089,8 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                     child: CachedNetworkImage(
                       placeholder: M3Container.square(
                         child: LoadingIndicatorM3E(
-                          containerColor: appbarcolor.withAlpha(100),
-                          color: appbarcolor.withAlpha(155),
+                          containerColor: primaryColor.withAlpha(100),
+                          color: primaryColor.withAlpha(155),
                         ),
                       ),
                       imageUrl: track.thumbnailUrl!,
@@ -1052,13 +1101,13 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
                   )
                 : Icon(
                     Icons.music_note,
-                    color: iconcolor.withAlpha((255 * 0.6).toInt()),
+                    color: iconColor?.withAlpha((255 * 0.6).toInt()),
                   ),
           ),
           title: Text(
             track.title,
             style: TextStyle(
-              color: txtcolor,
+              color: textColor,
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
@@ -1068,14 +1117,14 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
           subtitle: Text(
             track.artist,
             style: TextStyle(
-              color: txtcolor.withAlpha((255 * 0.7).toInt()),
+              color: textColor?.withAlpha((255 * 0.7).toInt()),
               fontSize: 12,
             ),
           ),
           trailing: Text(
             _formatDuration(track.duration ?? Duration.zero),
             style: TextStyle(
-              color: txtcolor.withAlpha((255 * 0.5).toInt()),
+              color: textColor?.withAlpha((255 * 0.5).toInt()),
               fontSize: 12,
             ),
           ),
@@ -1085,10 +1134,11 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
   }
 
   Widget _buildSkeletonTile() {
+    final cardColor = Theme.of(context).cardColor;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: cardcolor,
+        color: cardColor,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
@@ -1098,13 +1148,13 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
           height: 60,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            color: cardcolor.withAlpha((255 * 0.7).toInt()),
+            color: cardColor.withAlpha((255 * 0.7).toInt()),
           ),
         ),
         title: Container(
           height: 16,
           decoration: BoxDecoration(
-            color: cardcolor.withAlpha((255 * 0.7).toInt()),
+            color: cardColor.withAlpha((255 * 0.7).toInt()),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
@@ -1116,7 +1166,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
               height: 12,
               width: 100,
               decoration: BoxDecoration(
-                color: cardcolor.withAlpha((255 * 0.5).toInt()),
+                color: cardColor.withAlpha((255 * 0.5).toInt()),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -1125,7 +1175,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
               height: 10,
               width: 60,
               decoration: BoxDecoration(
-                color: cardcolor.withAlpha((255 * 0.5).toInt()),
+                color: cardColor.withAlpha((255 * 0.5).toInt()),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -1133,7 +1183,7 @@ class _SearchOverlayScreenState extends State<SearchOverlayScreen> {
         ),
         trailing: Icon(
           Icons.play_arrow,
-          color: cardcolor.withAlpha((255 * 0.7).toInt()),
+          color: cardColor.withAlpha((255 * 0.7).toInt()),
         ),
       ),
     );

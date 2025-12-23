@@ -22,24 +22,40 @@ class SettingsScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      backgroundColor: bgcolor,
+      // backgroundColor: bgcolor,
       appBar: AppBar(
-        backgroundColor: bgcolor,
+        // backgroundColor: bgcolor,
         elevation: 0,
         title: Text(
           AppStrings.settingsTitle(locale),
           style: TextStyle(color: txtcolor, fontWeight: FontWeight.bold),
         ),
-        iconTheme: IconThemeData(color: iconcolor),
+        // iconTheme: IconThemeData(color: iconcolor),
       ),
       body: ListTileTheme(
-        iconColor: appbarcolor,
+        // iconColor: appbarcolor,
         textColor: txtcolor,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
           children: [
+            _sectionHeader('Appearance'),
+            _sectionCard(context, [
+              SwitchListTile(
+                value: settings.dynamicThemeEnabled,
+                title: const Text('Dynamic Theme'),
+                subtitle: const Text('Use album art colors for the app theme'),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
+                onChanged: (v) => settings.setDynamicThemeEnabled(v),
+              ),
+            ]),
+            _tileDivider(),
             _sectionHeader(AppStrings.playback(locale)),
-            _sectionCard([
+            _sectionCard(context, [
               _dropdownTile<double>(
                 context,
                 title: AppStrings.playbackSpeed(locale),
@@ -61,10 +77,12 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.defaultShuffle,
                 title: Text(AppStrings.enableShuffleByDefault(locale)),
                 subtitle: Text(AppStrings.shuffleOnStart(locale)),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setDefaultShuffle(v),
               ),
               _tileDivider(),
@@ -90,10 +108,12 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.offlineMode,
                 title: const Text('Offline Mode'),
                 subtitle: const Text('Only play downloaded/local music'),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setOfflineMode(v),
               ),
               _tileDivider(),
@@ -152,15 +172,17 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader(AppStrings.audioFocus(locale)),
-            _sectionCard([
+            _sectionCard(context, [
               SwitchListTile(
                 value: settings.duckOnInterruption,
                 title: Text(AppStrings.duckOnInterruption(locale)),
                 subtitle: Text(AppStrings.lowerVolumeOnInterruption(locale)),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setDuckOnInterruption(v),
               ),
               _tileDivider(),
@@ -177,10 +199,12 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.autoResumeAfterInterruption,
                 title: Text(AppStrings.autoResume(locale)),
                 subtitle: const Text('Resume playback after short focus loss'),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setAutoResumeAfterInterruption(v),
               ),
               _tileDivider(),
@@ -211,7 +235,7 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader('General'),
-            _sectionCard([
+            _sectionCard(context, [
               _dropdownTile<String>(
                 context,
                 title: AppStrings.language(locale),
@@ -232,40 +256,47 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader('Search'),
-            _sectionCard([
+            _sectionCard(context, [
               SwitchListTile(
                 value: settings.showRecentSearches,
                 title: const Text('Show recent searches'),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setShowRecentSearches(v),
               ),
               _tileDivider(),
               SwitchListTile(
                 value: settings.showSearchSuggestions,
                 title: const Text('Show search suggestions'),
-                activeThumbColor: appbarcolor,
-                activeTrackColor: appbarcolor.withAlpha(140),
-                inactiveThumbColor: cardcolor.withAlpha(200),
-                inactiveTrackColor: cardcolor.withAlpha(90),
+                activeThumbColor: Theme.of(context).colorScheme.primary,
+                activeTrackColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withAlpha(140),
+                inactiveThumbColor: Theme.of(context).cardColor.withAlpha(200),
+                inactiveTrackColor: Theme.of(context).cardColor.withAlpha(90),
                 onChanged: (v) => settings.setShowSearchSuggestions(v),
               ),
             ]),
 
             _sectionHeader('Downloads'),
-            _sectionCard([
+            _sectionCard(context, [
               ListTile(
                 title: const Text('Download Location'),
                 subtitle: Text(settings.downloadPath),
-                trailing: Icon(Icons.edit, color: appbarcolor),
+                trailing: Icon(
+                  Icons.edit,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 onTap: () => _showPathEditor(context, settings),
               ),
             ]),
 
             _sectionHeader(AppStrings.maintenance(locale)),
-            _sectionCard([
+            _sectionCard(context, [
               ListTile(
                 leading: const Icon(Icons.cleaning_services_outlined),
                 title: Text(AppStrings.clearStreamImageCache(locale)),
@@ -311,7 +342,7 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader('Updates'),
-            _sectionCard([
+            _sectionCard(context, [
               ListTile(
                 leading: const Icon(Icons.system_update_alt_outlined),
                 title: const Text('Check for update'),
@@ -359,7 +390,7 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader(AppStrings.about(locale)),
-            _sectionCard([
+            _sectionCard(context, [
               ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: Text(AppStrings.appInfo(locale)),
@@ -392,7 +423,7 @@ class SettingsScreen extends StatelessWidget {
             ]),
 
             _sectionHeader(AppStrings.developerSection(locale)),
-            _sectionCard([
+            _sectionCard(context, [
               ListTile(
                 leading: const Icon(Icons.person_outline),
                 title: Text(AppStrings.developedBy(locale)),
@@ -439,12 +470,18 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _sectionCard(List<Widget> children) {
+  Widget _sectionCard(BuildContext context, List<Widget> children) {
     return Card(
-      color: cardcolor,
-      elevation: 3,
+      color: Theme.of(context).colorScheme.primary.withAlpha(30),
+      elevation: 0,
       margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.primary.withAlpha(50),
+          width: 1,
+        ),
+      ),
       child: Column(children: children),
     );
   }
@@ -474,9 +511,9 @@ class SettingsScreen extends StatelessWidget {
             ),
       trailing: DropdownButton<T>(
         value: current,
-        dropdownColor: cardcolor,
+        dropdownColor: Theme.of(context).cardColor,
         style: TextStyle(color: txtcolor),
-        iconEnabledColor: appbarcolor,
+        iconEnabledColor: Theme.of(context).colorScheme.primary,
         underline: const SizedBox.shrink(),
         onChanged: (v) => v == null ? null : onChanged(v),
         items: items
@@ -496,7 +533,7 @@ class SettingsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: cardcolor,
+        backgroundColor: Theme.of(context).dialogBackgroundColor,
         title: Text('Download Location', style: TextStyle(color: txtcolor)),
         content: TextField(
           controller: controller,
@@ -508,7 +545,9 @@ class SettingsScreen extends StatelessWidget {
               borderSide: BorderSide(color: txtcolor.withAlpha(100)),
             ),
             focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: appbarcolor),
+              borderSide: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),
@@ -522,7 +561,10 @@ class SettingsScreen extends StatelessWidget {
               settings.setDownloadPath(controller.text);
               Navigator.pop(context);
             },
-            child: Text('Save', style: TextStyle(color: appbarcolor)),
+            child: Text(
+              'Save',
+              style: TextStyle(color: Theme.of(context).colorScheme.primary),
+            ),
           ),
         ],
       ),

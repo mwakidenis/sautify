@@ -270,13 +270,67 @@ class _MainAppState extends State<MainApp> {
       ],
       child: Consumer<SettingsService>(
         builder: (context, settings, _) {
-          return MaterialApp(
-            scaffoldMessengerKey: _scaffoldMessengerKey,
-            debugShowCheckedModeBanner: false,
-            onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
-            theme: ThemeData(
-              primaryColorDark: bgcolor,
+          // Logic to determine if we should use dynamic theme
+          Color? seedColor;
+          if (settings.dynamicThemeEnabled) {
+            // Only watch SetColors if enabled
+            final setColors = context.watch<SetColors>();
+            if (setColors.primaryColors.isNotEmpty) {
+              seedColor = setColors.primaryColors[0];
+            }
+          }
+
+          final bool useDynamic =
+              settings.dynamicThemeEnabled && seedColor != null;
+
+          final ThemeData theme;
+          if (useDynamic) {
+            theme = ThemeData(
               useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: seedColor,
+                brightness: Brightness.dark,
+                primary: seedColor,
+              ),
+              textTheme: GoogleFonts.poppinsTextTheme(
+                Theme.of(
+                  context,
+                ).textTheme.apply(bodyColor: txtcolor, displayColor: txtcolor),
+              ),
+              snackBarTheme: SnackBarThemeData(
+                backgroundColor: seedColor,
+                elevation: 8.0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16.0),
+                ),
+                behavior: SnackBarBehavior.floating,
+                contentTextStyle: TextStyle(
+                  color: txtcolor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              pageTransitionsTheme: const PageTransitionsTheme(
+                builders: {
+                  TargetPlatform.android: ZoomPageTransitionsBuilder(),
+                  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+                },
+              ),
+            );
+          } else {
+            // Existing static theme
+            theme = ThemeData(
+              useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: appbarcolor,
+                brightness: Brightness.dark,
+                surface: bgcolor,
+              ),
+              scaffoldBackgroundColor: bgcolor,
+              appBarTheme: AppBarTheme(
+                backgroundColor: bgcolor,
+                elevation: 0,
+                iconTheme: IconThemeData(color: iconcolor),
+              ),
               textTheme: GoogleFonts.poppinsTextTheme(
                 Theme.of(
                   context,
@@ -300,15 +354,32 @@ class _MainAppState extends State<MainApp> {
                   TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
                 },
               ),
-            ),
+            );
+          }
+
+          return MaterialApp(
+            scaffoldMessengerKey: _scaffoldMessengerKey,
+            debugShowCheckedModeBanner: false,
+            onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
+            theme: theme,
             locale: _toLocale(settings.localeCode),
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
             home: Builder(
               builder: (innerCtx) {
                 final l10n = AppLocalizations.of(innerCtx);
+
+                // Adapt colors based on mode
+                final scaffoldBg = useDynamic ? null : bgcolor;
+                final navIndicatorColor = useDynamic
+                    ? Theme.of(innerCtx).colorScheme.secondaryContainer
+                    : appbarcolor.withAlpha(100);
+                final navBgColor = useDynamic
+                    ? Theme.of(innerCtx).colorScheme.surface
+                    : bgcolor;
+
                 return Scaffold(
-                  backgroundColor: bgcolor,
+                  backgroundColor: scaffoldBg,
                   bottomNavigationBar: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -316,7 +387,7 @@ class _MainAppState extends State<MainApp> {
                       const MiniPlayer(),
                       // Disable ripple/highlight specifically for the bottom nav bar
                       Theme(
-                        data: Theme.of(context).copyWith(
+                        data: Theme.of(innerCtx).copyWith(
                           splashFactory: NoSplash.splashFactory,
                           splashColor: Colors.transparent,
                           highlightColor: Colors.transparent,
@@ -328,8 +399,8 @@ class _MainAppState extends State<MainApp> {
                           indicatorStyle: NavBarM3EIndicatorStyle.pill,
                           size: NavBarM3ESize.small,
                           shapeFamily: NavBarM3EShapeFamily.square,
-                          indicatorColor: appbarcolor.withAlpha(100),
-                          backgroundColor: bgcolor,
+                          indicatorColor: navIndicatorColor,
+                          backgroundColor: navBgColor,
 
                           selectedIndex: _tab,
                           onDestinationSelected: (i) =>
@@ -358,7 +429,9 @@ class _MainAppState extends State<MainApp> {
                               icon: Icon(Icons.home_rounded, color: iconcolor),
                               selectedIcon: Icon(
                                 Icons.home,
-                                color: appbarcolor,
+                                color: useDynamic
+                                    ? Theme.of(innerCtx).colorScheme.primary
+                                    : appbarcolor,
                               ),
                               label: l10n.homeTitle,
                             ),
@@ -369,7 +442,9 @@ class _MainAppState extends State<MainApp> {
                               ),
                               selectedIcon: Icon(
                                 Icons.library_music,
-                                color: appbarcolor,
+                                color: useDynamic
+                                    ? Theme.of(innerCtx).colorScheme.primary
+                                    : appbarcolor,
                               ),
                               label: l10n.libraryTitle,
                             ),
@@ -380,7 +455,9 @@ class _MainAppState extends State<MainApp> {
                               ),
                               selectedIcon: Icon(
                                 Icons.download,
-                                color: appbarcolor,
+                                color: useDynamic
+                                    ? Theme.of(innerCtx).colorScheme.primary
+                                    : appbarcolor,
                               ),
                               label: l10n.downloadsTitle,
                             ),
@@ -391,7 +468,9 @@ class _MainAppState extends State<MainApp> {
                               ),
                               selectedIcon: Icon(
                                 Icons.settings,
-                                color: appbarcolor,
+                                color: useDynamic
+                                    ? Theme.of(innerCtx).colorScheme.primary
+                                    : appbarcolor,
                               ),
                               label: l10n.settingsTitle,
                             ),
