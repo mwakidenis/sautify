@@ -116,7 +116,7 @@ class AudioPlayerService extends ChangeNotifier {
   SendPort? _playlistWorkerSendPort;
   Isolate? _playlistWorker;
   ReceivePort?
-  _playlistWorkerReceivePort; // retained so it isn't GC'd & can be closed on dispose
+      _playlistWorkerReceivePort; // retained so it isn't GC'd & can be closed on dispose
   int _playlistWorkerRequestCounter = 0;
   static const int _isolateThreshold = 80; // min tracks to offload
   bool enableProgressiveIsolate = true; // feature flag
@@ -305,12 +305,12 @@ class AudioPlayerService extends ChangeNotifier {
 
   // Lightweight derived snapshot stream (optional consumer optimization)
   Stream<PlaybackSnapshot> get playbackSnapshotStream => trackInfoStream.map(
-    (t) => PlaybackSnapshot(
-      videoId: t.track?.videoId,
-      isPlaying: t.isPlaying,
-      progress: t.progress,
-    ),
-  );
+        (t) => PlaybackSnapshot(
+          videoId: t.track?.videoId,
+          isPlaying: t.isPlaying,
+          progress: t.progress,
+        ),
+      );
 
   // Expose preparation/loading state for UI skeletons
   final ValueNotifier<bool> isPreparing = ValueNotifier<bool>(false);
@@ -327,8 +327,8 @@ class AudioPlayerService extends ChangeNotifier {
   LoopMode get loopMode => _loopMode;
   StreamingData? get currentTrack =>
       _playlist.isNotEmpty && _currentIndex < _playlist.length
-      ? _playlist[_currentIndex]
-      : null;
+          ? _playlist[_currentIndex]
+          : null;
 
   // Stream getters
   Stream<Duration> get positionStream => _player.positionStream;
@@ -367,46 +367,36 @@ class AudioPlayerService extends ChangeNotifier {
 
   void _startTrackInfoRx() {
     _trackInfoRxSub?.cancel();
-    final rx$ =
-        Rx.combineLatest6<
-              Duration,
-              Duration?,
-              PlayerState,
-              int?,
-              bool,
-              LoopMode,
-              TrackInfo
-            >(
-              _player.positionStream,
-              _player.durationStream,
-              _player.playerStateStream,
-              _player.currentIndexStream,
-              _player.shuffleModeEnabledStream,
-              _player.loopModeStream,
-              (pos, dur, ps, idx, shuf, loop) {
-                final track = currentTrack;
-                final total = _playlist.length;
-                final progress = (dur != null && dur.inMilliseconds > 0)
-                    ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-                    : 0.0;
-                final lm = _loopModeString[loop] ?? 'off';
-                return TrackInfo(
-                  track: track,
-                  currentIndex: _currentIndex,
-                  totalTracks: total,
-                  isPlaying: ps.playing,
-                  isShuffleEnabled: shuf,
-                  loopMode: lm,
-                  position: pos,
-                  duration: dur,
-                  progress: progress,
-                  sourceName: _sourceName,
-                  sourceType: _sourceType,
-                );
-              },
-            )
-            .distinct((a, b) => a == b)
-            .sampleTime(const Duration(milliseconds: 250));
+    final rx$ = Rx.combineLatest6<Duration, Duration?, PlayerState, int?, bool,
+        LoopMode, TrackInfo>(
+      _player.positionStream,
+      _player.durationStream,
+      _player.playerStateStream,
+      _player.currentIndexStream,
+      _player.shuffleModeEnabledStream,
+      _player.loopModeStream,
+      (pos, dur, ps, idx, shuf, loop) {
+        final track = currentTrack;
+        final total = _playlist.length;
+        final progress = (dur != null && dur.inMilliseconds > 0)
+            ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+            : 0.0;
+        final lm = _loopModeString[loop] ?? 'off';
+        return TrackInfo(
+          track: track,
+          currentIndex: _currentIndex,
+          totalTracks: total,
+          isPlaying: ps.playing,
+          isShuffleEnabled: shuf,
+          loopMode: lm,
+          position: pos,
+          duration: dur,
+          progress: progress,
+          sourceName: _sourceName,
+          sourceType: _sourceType,
+        );
+      },
+    ).distinct((a, b) => a == b).sampleTime(const Duration(milliseconds: 250));
 
     _trackInfoRxSub = rx$.listen(
       (t) => _trackInfoSubject.add(t),
@@ -461,8 +451,7 @@ class AudioPlayerService extends ChangeNotifier {
       otherChanged = true;
     } else {
       final prev = _lastTrackInfo!;
-      otherChanged =
-          (info.track?.videoId != prev.track?.videoId) ||
+      otherChanged = (info.track?.videoId != prev.track?.videoId) ||
           info.currentIndex != prev.currentIndex ||
           info.totalTracks != prev.totalTracks ||
           info.isPlaying != prev.isPlaying ||
@@ -934,6 +923,25 @@ class AudioPlayerService extends ChangeNotifier {
             } catch (_) {}
             _warmNextConnection();
           }();
+        } else {
+          // If no remaining tracks to resolve, ensure we still rebuild the audio source
+          // to include the full playlist (unless using progressive isolate which handles it separately).
+          final largeAndProgressive =
+              _playlist.length >= _isolateThreshold && enableProgressiveIsolate;
+
+          if (!largeAndProgressive) {
+            () async {
+              if (requestId != _loadRequestId) return;
+              try {
+                await _rebuildAudioSource(
+                  preferPlaylistIndex: _currentIndex,
+                  preservePosition: true,
+                  requestId: requestId,
+                );
+              } catch (_) {}
+              _warmNextConnection();
+            }();
+          }
         }
       }
 
@@ -951,8 +959,8 @@ class AudioPlayerService extends ChangeNotifier {
       final warmDelay = resolveAllBeforeFeeding
           ? const Duration(milliseconds: 350)
           : ((_playlist.length >= _isolateThreshold && enableProgressiveIsolate)
-                ? const Duration(milliseconds: 1000)
-                : const Duration(milliseconds: 350));
+              ? const Duration(milliseconds: 1000)
+              : const Duration(milliseconds: 350));
       Future.delayed(warmDelay, () {
         if (requestId != _loadRequestId) return;
         _preloadUpcomingSongs();
@@ -972,9 +980,8 @@ class AudioPlayerService extends ChangeNotifier {
         // Clear or complete progress after a delay to allow UI to show completion
         if (loadingProgress.value != null &&
             !loadingProgress.value!.isComplete) {
-          final loadedCount = _playlist
-              .where((t) => t.isReady && t.streamUrl != null)
-              .length;
+          final loadedCount =
+              _playlist.where((t) => t.isReady && t.streamUrl != null).length;
           loadingProgress.value = LoadingProgress(
             totalTracks: _playlist.length,
             loadedTracks: loadedCount,
@@ -987,12 +994,10 @@ class AudioPlayerService extends ChangeNotifier {
           'finalizeLoad',
           extra: {
             'playlistSize': _playlist.length,
-            'progressive':
-                _playlist.length >= _isolateThreshold &&
+            'progressive': _playlist.length >= _isolateThreshold &&
                 enableProgressiveIsolate,
             'fingerprint': _playlistFingerprint,
-            'largeFastPath':
-                _playlist.length >= _isolateThreshold &&
+            'largeFastPath': _playlist.length >= _isolateThreshold &&
                 enableProgressiveIsolate,
           },
         );
@@ -1051,9 +1056,8 @@ class AudioPlayerService extends ChangeNotifier {
             title: t.title,
             artist: t.artist,
             duration: t.duration,
-            artUri: t.thumbnailUrl != null
-                ? Uri.tryParse(t.thumbnailUrl!)
-                : null,
+            artUri:
+                t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
             extras: {'videoId': t.videoId, 'isLocal': true},
           ),
         ),
@@ -1151,9 +1155,8 @@ class AudioPlayerService extends ChangeNotifier {
             title: t.title,
             artist: t.artist,
             duration: t.duration,
-            artUri: t.thumbnailUrl != null
-                ? Uri.tryParse(t.thumbnailUrl!)
-                : null,
+            artUri:
+                t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
             extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
           ),
         ),
@@ -1335,8 +1338,7 @@ class AudioPlayerService extends ChangeNotifier {
     int nextIndex;
     if (_isShuffleEnabled && _childToPlaylistIndex.isNotEmpty) {
       final seqLen = _childToPlaylistIndex.length;
-      final currentSeq =
-          _player.currentIndex ??
+      final currentSeq = _player.currentIndex ??
           _childIndexToSequenceIndex(_getAudioSourceIndex(_currentIndex));
       final nextSeq = (currentSeq + 1) % seqLen;
       nextIndex = _sequenceIndexToPlaylistIndex(nextSeq);
@@ -1367,8 +1369,7 @@ class AudioPlayerService extends ChangeNotifier {
     int prevIndex;
     if (_isShuffleEnabled && _childToPlaylistIndex.isNotEmpty) {
       final seqLen = _childToPlaylistIndex.length;
-      final currentSeq =
-          _player.currentIndex ??
+      final currentSeq = _player.currentIndex ??
           _childIndexToSequenceIndex(_getAudioSourceIndex(_currentIndex));
       final prevSeq = (currentSeq - 1 + seqLen) % seqLen;
       prevIndex = _sequenceIndexToPlaylistIndex(prevSeq);
@@ -1399,8 +1400,7 @@ class AudioPlayerService extends ChangeNotifier {
     if (_isShuffleEnabled && _childToPlaylistIndex.isNotEmpty) {
       // Preload according to shuffle sequence order
       final seqLen = _childToPlaylistIndex.length;
-      final currentSeq =
-          _player.currentIndex ??
+      final currentSeq = _player.currentIndex ??
           _childIndexToSequenceIndex(_getAudioSourceIndex(_currentIndex));
       for (int i = 1; i <= _preloadCount; i++) {
         final seqIndex = (currentSeq + i) % seqLen;
@@ -1677,9 +1677,8 @@ class AudioPlayerService extends ChangeNotifier {
         .toList();
 
     if (newIndicesToPreload.isNotEmpty) {
-      final videoIds = newIndicesToPreload
-          .map((index) => _playlist[index].videoId)
-          .toList();
+      final videoIds =
+          newIndicesToPreload.map((index) => _playlist[index].videoId).toList();
 
       await _batchProcessTracks(videoIds);
       _preloadedIndices.addAll(newIndicesToPreload);
@@ -1764,9 +1763,8 @@ class AudioPlayerService extends ChangeNotifier {
               title: t.title,
               artist: t.artist,
               duration: t.duration,
-              artUri: t.thumbnailUrl != null
-                  ? Uri.tryParse(t.thumbnailUrl!)
-                  : null,
+              artUri:
+                  t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
               extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
             );
 
@@ -1805,9 +1803,8 @@ class AudioPlayerService extends ChangeNotifier {
             title: t.title,
             artist: t.artist,
             duration: t.duration,
-            artUri: t.thumbnailUrl != null
-                ? Uri.tryParse(t.thumbnailUrl!)
-                : null,
+            artUri:
+                t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
             extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
           );
 
@@ -1865,16 +1862,14 @@ class AudioPlayerService extends ChangeNotifier {
           break;
         }
       }
-      fallbackPlaylistIndex ??= readyIndices.isNotEmpty
-          ? readyIndices.first
-          : 0;
+      fallbackPlaylistIndex ??=
+          readyIndices.isNotEmpty ? readyIndices.first : 0;
       newChildIndex = _getAudioSourceIndex(fallbackPlaylistIndex);
     }
 
     // Create and set the new audio source
     // Decide initial position: keep position only if staying on same playlist index and that track is ready
-    final keepPosition =
-        preservePosition &&
+    final keepPosition = preservePosition &&
         desiredPlaylistIndex == _currentIndex &&
         _playlist[desiredPlaylistIndex].isReady;
 
