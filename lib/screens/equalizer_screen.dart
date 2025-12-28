@@ -1,50 +1,34 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_oknob/flutter_oldschool_knob.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
+import 'package:sautifyv2/features/equalizer/data/equalizer_repository_impl.dart';
+import 'package:sautifyv2/features/equalizer/presentation/cubit/equalizer_cubit.dart';
+import 'package:sautifyv2/features/equalizer/presentation/cubit/equalizer_state.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/settings_service.dart';
 
-class EqualizerScreen extends StatefulWidget {
+class EqualizerScreen extends StatelessWidget {
   const EqualizerScreen({super.key});
 
   @override
-  State<EqualizerScreen> createState() => _EqualizerScreenState();
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => EqualizerCubit(
+        repo: EqualizerRepositoryImpl(
+          audio: AudioPlayerService(),
+          settings: SettingsService(),
+        ),
+      )..init(),
+      child: const _EqualizerView(),
+    );
+  }
 }
 
-class _EqualizerScreenState extends State<EqualizerScreen> {
-  final _audioService = AudioPlayerService();
-  final _settings = SettingsService();
-  AndroidEqualizerParameters? _parameters;
-  bool _isLoading = true;
-  bool _isEnabled = false;
-  final double _value = 0.5;
-
-  @override
-  void initState() {
-    super.initState();
-    _initEqualizer();
-  }
-
-  Future<void> _initEqualizer() async {
-    if (!Platform.isAndroid) {
-      setState(() => _isLoading = false);
-      return;
-    }
-
-    try {
-      _parameters = await _audioService.equalizer.parameters;
-      _isEnabled = _settings.equalizerEnabled;
-      // Ensure equalizer state matches settings
-      await _audioService.equalizer.setEnabled(_isEnabled);
-    } catch (e) {
-      debugPrint('Error initializing equalizer: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
+class _EqualizerView extends StatelessWidget {
+  const _EqualizerView();
 
   @override
   Widget build(BuildContext context) {
@@ -70,47 +54,55 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('Equalizer'),
-        backgroundColor: scaffoldBackgroundColor,
-        foregroundColor: textColor,
-        actions: [
-          Switch(
-            value: _isEnabled,
-            onChanged: (value) async {
-              setState(() => _isEnabled = value);
-              await _settings.setEqualizerEnabled(value);
-              await _audioService.equalizer.setEnabled(value);
-            },
-            activeThumbColor: primaryColor,
+    return BlocBuilder<EqualizerCubit, EqualizerState>(
+      builder: (context, state) {
+        return Scaffold(
+          backgroundColor: scaffoldBackgroundColor,
+          appBar: AppBar(
+            title: const Text('Equalizer'),
+            backgroundColor: scaffoldBackgroundColor,
+            foregroundColor: textColor,
+            actions: [
+              Switch(
+                value: state.enabled,
+                onChanged: state.status == EqualizerStatus.ready
+                    ? (value) =>
+                        context.read<EqualizerCubit>().setEnabled(value)
+                    : null,
+                activeThumbColor: primaryColor,
+              ),
+            ],
           ),
-        ],
-      ),
-      body: _isLoading
-          ? Center(
-              child: LoadingIndicatorM3E(
-                containerColor: primaryColor.withAlpha(100),
-                variant: LoadingIndicatorM3EVariant.contained,
-                color: primaryColor,
+          body: switch (state.status) {
+            EqualizerStatus.loading => Center(
+                child: LoadingIndicatorM3E(
+                  containerColor: primaryColor.withAlpha(100),
+                  variant: LoadingIndicatorM3EVariant.contained,
+                  color: primaryColor,
+                ),
               ),
-            )
-          : _parameters == null
-          ? Center(
-              child: Text(
-                'Equalizer not available',
-                style: TextStyle(color: textColor),
+            EqualizerStatus.unavailable => Center(
+                child: Text(
+                  state.isSupported
+                      ? 'Equalizer not available'
+                      : 'Equalizer is only available on Android',
+                  style: TextStyle(color: textColor),
+                ),
               ),
-            )
-          : _buildBands(),
+            EqualizerStatus.ready => _BandsView(state: state),
+          },
+        );
+      },
     );
   }
+}
 
-  Widget _buildBands() {
-    final bands = _parameters!.bands;
-    final minDecibels = _parameters!.minDecibels;
-    final maxDecibels = _parameters!.maxDecibels;
+class _BandsView extends StatelessWidget {
+  final EqualizerState state;
+  const _BandsView({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
     final textColor =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
@@ -124,14 +116,13 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
             height: 300,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: bands.map((band) {
-                final freq = band.centerFrequency;
+              children: state.bands.map((band) {
+                final freq = band.centerFrequencyHz;
                 final freqLabel = freq < 1000
-                    ? '${freq.toInt()} Hz'
+                    ? '$freq Hz'
                     : '${(freq / 1000).toStringAsFixed(1)} kHz';
 
-                // Get current gain from settings or default to 0
-                final currentGain = _settings.equalizerBands[band.index] ?? 0.0;
+                final currentGain = band.gainDb;
 
                 return Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -153,24 +144,13 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                             value: currentGain.clamp(-15.0, 15.0),
                             min: -15.0,
                             max: 15.0,
-                            activeColor: _isEnabled
-                                ? primaryColor
-                                : Colors.grey,
+                            activeColor:
+                                state.enabled ? primaryColor : Colors.grey,
                             inactiveColor: cardColor,
-                            onChanged: _isEnabled
-                                ? (value) async {
-                                    setState(() {
-                                      _settings.equalizerBands[band.index] =
-                                          value;
-                                    });
-                                    await band.setGain(
-                                      value.clamp(minDecibels, maxDecibels),
-                                    );
-                                    _settings.setEqualizerBand(
-                                      band.index,
-                                      value,
-                                    );
-                                  }
+                            onChanged: state.enabled
+                                ? (value) => context
+                                    .read<EqualizerCubit>()
+                                    .setBandGain(band.index, value)
                                 : null,
                           ),
                         ),
@@ -180,7 +160,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     Text(
                       freqLabel,
                       style: TextStyle(
-                        color: _isEnabled ? textColor : Colors.grey,
+                        color: state.enabled ? textColor : Colors.grey,
                         fontSize: 12,
                       ),
                     ),
@@ -188,7 +168,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     Text(
                       '${currentGain.toStringAsFixed(1)} dB',
                       style: TextStyle(
-                        color: _isEnabled
+                        color: state.enabled
                             ? textColor.withAlpha(150)
                             : Colors.grey,
                         fontSize: 10,
@@ -197,40 +177,40 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                     const SizedBox(height: 20),
                   ],
                 );
-              }).toList(),
+              }).toList(growable: false),
             ),
           ),
           const SizedBox(height: 20),
-          // Reset button
           TextButton(
-            onPressed: _isEnabled
-                ? () async {
-                    for (final band in bands) {
-                      await band.setGain(0.0);
-                      await _settings.setEqualizerBand(band.index, 0.0);
-                    }
-                    setState(() {});
-                  }
+            onPressed: state.enabled
+                ? () => context.read<EqualizerCubit>().resetBands()
                 : null,
             child: Text(
               'Reset to Flat',
-              style: TextStyle(color: _isEnabled ? primaryColor : Colors.grey),
+              style: TextStyle(
+                color: state.enabled ? primaryColor : Colors.grey,
+              ),
             ),
           ),
-          //     const Divider(color: Colors.grey),
           const SizedBox(height: 10),
-          _buildSpeedAndPitchControl(),
+          _SpeedAndPitchControl(state: state),
           const SizedBox(height: 10),
-          _buildSkipSilenceControl(),
+          _SkipSilenceControl(state: state),
           const SizedBox(height: 10),
-          _buildLoudnessEnhancerControl(),
+          _LoudnessEnhancerControl(state: state),
           const SizedBox(height: 40),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSkipSilenceControl() {
+class _SkipSilenceControl extends StatelessWidget {
+  final EqualizerState state;
+  const _SkipSilenceControl({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
     final textColor =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
@@ -242,22 +222,23 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
         children: [
           Text('Skip Silence', style: TextStyle(color: textColor)),
           Switch(
-            value: _settings.skipSilenceEnabled,
-            onChanged: (value) async {
-              setState(() {
-                _settings.skipSilenceEnabled = value;
-              });
-              await _audioService.player.setSkipSilenceEnabled(value);
-              await _settings.setSkipSilenceEnabled(value);
-            },
+            value: state.skipSilenceEnabled,
+            onChanged: (value) =>
+                context.read<EqualizerCubit>().setSkipSilenceEnabled(value),
             activeThumbColor: primaryColor,
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildLoudnessEnhancerControl() {
+class _LoudnessEnhancerControl extends StatelessWidget {
+  final EqualizerState state;
+  const _LoudnessEnhancerControl({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
     final textColor =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
@@ -271,20 +252,16 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
             children: [
               Text('Loudness Enhancer', style: TextStyle(color: textColor)),
               Switch(
-                value: _settings.loudnessEnhancerEnabled,
-                onChanged: (value) async {
-                  setState(() {
-                    _settings.loudnessEnhancerEnabled = value;
-                  });
-                  await _audioService.loudnessEnhancer.setEnabled(value);
-                  await _settings.setLoudnessEnhancerEnabled(value);
-                },
+                value: state.loudnessEnhancerEnabled,
+                onChanged: (value) => context
+                    .read<EqualizerCubit>()
+                    .setLoudnessEnhancerEnabled(value),
                 activeThumbColor: primaryColor,
               ),
             ],
           ),
         ),
-        if (_settings.loudnessEnhancerEnabled)
+        if (state.loudnessEnhancerEnabled)
           Column(
             children: [
               const SizedBox(height: 10),
@@ -295,18 +272,16 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                   minValue: -10.0,
                   maxValue: 20.0,
                   size: 140,
-                  knobvalue: _settings.loudnessEnhancerTargetGain,
+                  knobvalue: state.loudnessEnhancerTargetGain,
                   showKnobLabels: false,
                   maxRotationAngle: 180,
                   sensitivity: 0.6,
-                  onChanged: (value) async {
+                  onChanged: (value) {
                     final clamped = value.clamp(0.0, 20.0);
                     final rounded = double.parse(clamped.toStringAsFixed(1));
-                    setState(() {
-                      _settings.loudnessEnhancerTargetGain = rounded;
-                    });
-                    await _audioService.loudnessEnhancer.setTargetGain(rounded);
-                    await _settings.setLoudnessEnhancerTargetGain(rounded);
+                    context
+                        .read<EqualizerCubit>()
+                        .setLoudnessEnhancerTargetGain(rounded);
                   },
                   knobLabel: Text(
                     'Gain',
@@ -317,7 +292,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Gain: ${_settings.loudnessEnhancerTargetGain.toStringAsFixed(1)} dB',
+                'Gain: ${state.loudnessEnhancerTargetGain.toStringAsFixed(1)} dB',
                 style: TextStyle(color: textColor),
               ),
             ],
@@ -325,8 +300,14 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
       ],
     );
   }
+}
 
-  Widget _buildSpeedAndPitchControl() {
+class _SpeedAndPitchControl extends StatelessWidget {
+  final EqualizerState state;
+  const _SpeedAndPitchControl({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
     final textColor =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.white;
@@ -336,7 +317,6 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Speed Control
           Column(
             children: [
               SizedBox(
@@ -347,30 +327,25 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                   maxValue: 2.0,
                   size: 140,
                   markerColor: primaryColor,
-                  knobvalue: _settings.defaultPlaybackSpeed,
+                  knobvalue: state.playbackSpeed,
                   showKnobLabels: false,
                   maxRotationAngle: 180,
                   sensitivity: 0.6,
-                  onChanged: (value) async {
-                    var clamped = value.clamp(0.5, 2.0);
+                  onChanged: (value) {
+                    final clamped = value.clamp(0.5, 2.0);
                     final rounded = double.parse(clamped.toStringAsFixed(2));
-                    setState(() {
-                      _settings.defaultPlaybackSpeed = rounded;
-                    });
-                    await _audioService.player.setSpeed(rounded);
-                    await _settings.setDefaultPlaybackSpeed(rounded);
+                    context.read<EqualizerCubit>().setPlaybackSpeed(rounded);
                   },
                   knobLabel: Text('Speed', style: TextStyle(color: textColor)),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Speed: ${_settings.defaultPlaybackSpeed.toStringAsFixed(2)}x',
+                'Speed: ${state.playbackSpeed.toStringAsFixed(2)}x',
                 style: TextStyle(color: textColor),
               ),
             ],
           ),
-          // Pitch Control
           Column(
             children: [
               SizedBox(
@@ -381,25 +356,21 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                   maxValue: 2.0,
                   markerColor: primaryColor,
                   size: 140,
-                  knobvalue: _settings.pitch,
+                  knobvalue: state.pitch,
                   showKnobLabels: false,
                   maxRotationAngle: 180,
                   sensitivity: 0.6,
-                  onChanged: (value) async {
-                    var clamped = value.clamp(0.5, 2.0);
+                  onChanged: (value) {
+                    final clamped = value.clamp(0.5, 2.0);
                     final rounded = double.parse(clamped.toStringAsFixed(2));
-                    setState(() {
-                      _settings.pitch = rounded;
-                    });
-                    await _audioService.player.setPitch(rounded);
-                    await _settings.setPitch(rounded);
+                    context.read<EqualizerCubit>().setPitch(rounded);
                   },
                   knobLabel: Text('Pitch', style: TextStyle(color: textColor)),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Pitch: ${_settings.pitch.toStringAsFixed(2)}x',
+                'Pitch: ${state.pitch.toStringAsFixed(2)}x',
                 style: TextStyle(color: textColor),
               ),
             ],

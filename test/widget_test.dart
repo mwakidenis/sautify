@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:sautifyv2/blocs/settings/settings_cubit.dart';
 import 'package:sautifyv2/main.dart';
 import 'package:sautifyv2/utils/app_config.dart';
 
@@ -25,7 +26,7 @@ void main() {
   testWidgets('App renders and shows bottom navigation destinations', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MainApp());
+    await tester.pumpWidget(MainApp(settingsCubit: SettingsCubit()));
     // Allow a few frames for async init without waiting on long network timeouts.
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 100));

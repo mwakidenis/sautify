@@ -1,28 +1,108 @@
+﻿import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
-import 'package:sautifyv2/db/library_store.dart';
-import 'package:sautifyv2/models/stats_model.dart';
+import 'package:sautifyv2/blocs/library/library_cubit.dart';
+import 'package:sautifyv2/blocs/library/library_state.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
-import 'package:sautifyv2/services/image_cache_service.dart';
+import 'package:sautifyv2/widgets/local_artwork_image.dart';
 
-class StatsScreen extends StatefulWidget {
-  const StatsScreen({super.key});
-
-  @override
-  State<StatsScreen> createState() => _StatsScreenState();
+bool _isHttpUrl(String url) {
+  final u = url.trim().toLowerCase();
+  return u.startsWith('http://') || u.startsWith('https://');
 }
 
-class _StatsScreenState extends State<StatsScreen> {
+bool _looksLikeFilePath(String urlOrPath) {
+  final s = urlOrPath.trim().toLowerCase();
+  if (s.startsWith('file://')) return true;
+  if (s.startsWith('content://')) return false;
+  return s.startsWith('/') || RegExp(r'^[a-z]:\\').hasMatch(s);
+}
+
+String _stripFileScheme(String s) {
+  final trimmed = s.trim();
+  if (trimmed.toLowerCase().startsWith('file://')) {
+    return trimmed.substring('file://'.length);
+  }
+  return trimmed;
+}
+
+int? _tryParseLocalId(String videoId) {
+  if (videoId.startsWith('local_')) {
+    return int.tryParse(videoId.substring('local_'.length));
+  }
+  if (videoId.startsWith('local:')) {
+    return int.tryParse(videoId.substring('local:'.length));
+  }
+  return null;
+}
+
+Widget _buildTrackArtwork(BuildContext context, StreamingData track) {
+  const double size = 50;
+  final theme = Theme.of(context);
+
+  final placeholder = Container(
+    color: theme.colorScheme.surfaceContainerHighest,
+    child: Icon(
+      Icons.music_note,
+      color: theme.iconTheme.color?.withAlpha(100),
+    ),
+  );
+
+  Widget child;
+  if (track.isLocal && track.localId != null) {
+    child = LocalArtworkImage(
+      localId: track.localId!,
+      placeholder: placeholder,
+      fit: BoxFit.cover,
+    );
+  } else {
+    final thumb = track.thumbnailUrl;
+    if (thumb != null && thumb.isNotEmpty) {
+      if (_looksLikeFilePath(thumb)) {
+        child = Image.file(
+          File(_stripFileScheme(thumb)),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => placeholder,
+        );
+      } else if (_isHttpUrl(thumb)) {
+        child = CachedNetworkImage(
+          imageUrl: thumb,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorWidget: (_, __, ___) => placeholder,
+          placeholder: (_, __) => placeholder,
+        );
+      } else {
+        child = placeholder;
+      }
+    } else {
+      child = placeholder;
+    }
+  }
+
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(6),
+    child: SizedBox(width: size, height: size, child: child),
+  );
+}
+
+class StatsScreen extends StatelessWidget {
+  const StatsScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        // backgroundColor: bgcolor,
         appBar: AppBar(
-          // backgroundColor: bgcolor,
-          // foregroundColor: Colors.white,
           title: const Text('Listening History'),
           actions: [
             IconButton(
@@ -34,7 +114,6 @@ class _StatsScreenState extends State<StatsScreen> {
                   builder: (context) => AlertDialog(
                     backgroundColor: Theme.of(context).cardColor,
                     title: Row(
-                      //spacing: 10,
                       children: [
                         Text(
                           'Clear History',
@@ -70,26 +149,11 @@ class _StatsScreenState extends State<StatsScreen> {
                               ),
                             ),
                           ),
-
                           TextButton(
                             onPressed: () => Navigator.pop(context, true),
-                            child: SizedBox(
-                              height: 30,
-                              width: 50,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: Colors.red.withAlpha(100),
-                                  ),
-                                ),
-                                child: const Center(
-                                  child: Text(
-                                    'Clear',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ),
-                              ),
+                            child: const Text(
+                              'Clear',
+                              style: TextStyle(color: Colors.red),
                             ),
                           ),
                         ],
@@ -98,9 +162,8 @@ class _StatsScreenState extends State<StatsScreen> {
                   ),
                 );
 
-                if (confirm == true) {
-                  await LibraryStore.clearHistory();
-                  if (mounted) setState(() {});
+                if (confirm == true && context.mounted) {
+                  context.read<LibraryCubit>().clearHistory();
                 }
               },
             ),
@@ -115,10 +178,10 @@ class _StatsScreenState extends State<StatsScreen> {
             ],
           ),
         ),
-        body: TabBarView(
+        body: const TabBarView(
           children: [
-            _RecentlyPlayedTab(key: UniqueKey()),
-            const _MostPlayedTab(),
+            _RecentlyPlayedTab(),
+            _MostPlayedTab(),
           ],
         ),
       ),
@@ -127,14 +190,13 @@ class _StatsScreenState extends State<StatsScreen> {
 }
 
 class _RecentlyPlayedTab extends StatelessWidget {
-  const _RecentlyPlayedTab({super.key});
+  const _RecentlyPlayedTab();
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<StreamingData>>(
-      future: LibraryStore.getRecentPlays(limit: 100),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+    return BlocBuilder<LibraryCubit, LibraryState>(
+      builder: (context, state) {
+        if (!state.isReady) {
           return const Center(
             child: LoadingIndicatorM3E(
               variant: LoadingIndicatorM3EVariant.contained,
@@ -142,7 +204,7 @@ class _RecentlyPlayedTab extends StatelessWidget {
             ),
           );
         }
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+        if (state.recentPlays.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -157,7 +219,7 @@ class _RecentlyPlayedTab extends StatelessWidget {
             ),
           );
         }
-        final tracks = snapshot.data!;
+        final tracks = state.recentPlays;
         return ListView.builder(
           itemCount: tracks.length,
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -174,26 +236,7 @@ class _RecentlyPlayedTab extends StatelessWidget {
                 ),
               ),
               child: ListTile(
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: CachedNetworkImage(
-                    imageUrl: track.thumbnailUrl ?? '',
-                    width: 50,
-                    height: 50,
-                    fit: BoxFit.cover,
-                    errorWidget: Container(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      child: Icon(
-                        Icons.music_note,
-                        color: Theme.of(
-                          context,
-                        ).iconTheme.color?.withAlpha(100),
-                      ),
-                    ),
-                  ),
-                ),
+                leading: _buildTrackArtwork(context, track),
                 title: Text(
                   track.title,
                   maxLines: 1,
@@ -235,10 +278,9 @@ class _MostPlayedTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<SongStats>>(
-      future: LibraryStore.getMostPlayed(limit: 50),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+    return BlocBuilder<LibraryCubit, LibraryState>(
+      builder: (context, state) {
+        if (!state.isReady) {
           return const Center(
             child: LoadingIndicatorM3E(
               variant: LoadingIndicatorM3EVariant.contained,
@@ -246,7 +288,7 @@ class _MostPlayedTab extends StatelessWidget {
             ),
           );
         }
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+        if (state.mostPlayed.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -261,7 +303,7 @@ class _MostPlayedTab extends StatelessWidget {
             ),
           );
         }
-        final stats = snapshot.data!;
+        final stats = state.mostPlayed;
         return ListView.builder(
           itemCount: stats.length,
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -278,16 +320,15 @@ class _MostPlayedTab extends StatelessWidget {
                 ),
               ),
               child: ListTile(
-                leading: SizedBox(
-                  width: 40,
-                  child: Center(
-                    child: Text(
-                      '#${index + 1}',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
+                leading: _buildTrackArtwork(
+                  context,
+                  StreamingData(
+                    videoId: stat.videoId,
+                    title: stat.title,
+                    artist: stat.artist,
+                    thumbnailUrl: stat.thumbnailUrl,
+                    isLocal: _tryParseLocalId(stat.videoId) != null,
+                    localId: _tryParseLocalId(stat.videoId),
                   ),
                 ),
                 title: Text(
@@ -300,39 +341,36 @@ class _MostPlayedTab extends StatelessWidget {
                   ),
                 ),
                 subtitle: Text(
-                  '${stat.artist} • ${stat.playCount} plays',
+                  '${stat.artist}  ${stat.playCount} plays',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.color?.withAlpha(180),
                   ),
                 ),
-                trailing: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: CachedNetworkImage(
-                    imageUrl: stat.thumbnailUrl ?? '',
-                    width: 40,
-                    height: 40,
-                    fit: BoxFit.cover,
-                    errorWidget: Container(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      child: Icon(
-                        Icons.music_note,
-                        color: Theme.of(
-                          context,
-                        ).iconTheme.color?.withAlpha(100),
+                trailing: Text(
+                  '#${index + 1}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
-                    ),
-                  ),
                 ),
                 onTap: () {
+                  final localId = _tryParseLocalId(stat.videoId);
+                  final isLocal = localId != null;
                   final track = StreamingData(
                     videoId: stat.videoId,
                     title: stat.title,
                     artist: stat.artist,
                     thumbnailUrl: stat.thumbnailUrl,
+                    isLocal: isLocal,
+                    localId: localId,
+                    streamUrl: isLocal
+                        ? 'content://media/external/audio/media/$localId'
+                        : null,
+                    isAvailable: true,
                   );
                   AudioPlayerService().loadPlaylist(
                     [track],

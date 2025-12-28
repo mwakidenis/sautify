@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 // DISABLED: Progress overlay removed per user request
 // Songs now stream in background and play immediately
 // Original imports kept for reference:
-// import 'package:provider/provider.dart';
 // import 'package:sautifyv2/models/loading_progress_model.dart';
 // import 'package:sautifyv2/services/audio_player_service.dart';
 

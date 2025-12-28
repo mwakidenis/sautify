@@ -256,6 +256,10 @@ class AudioPlayerService extends ChangeNotifier {
   // Maintain mapping from audio child index -> playlist index for the current source
   List<int> _childToPlaylistIndex = <int>[];
 
+  // Track the player's raw audio index so we can detect track changes even when
+  // our mapping is temporarily incomplete.
+  int? _lastAudioChildIndex;
+
   // Playlist fingerprint to detect identity changes quickly
   String? _playlistFingerprint;
   String? get playlistFingerprint => _playlistFingerprint;
@@ -578,12 +582,19 @@ class AudioPlayerService extends ChangeNotifier {
     // Listen to player events
     _player.currentIndexStream.listen((audioIndex) {
       if (audioIndex != null) {
+        // Avoid duplicate handling for the same emitted value.
+        if (_lastAudioChildIndex == audioIndex) return;
+        _lastAudioChildIndex = audioIndex;
+
         // audioIndex is the index in the ConcatenatingAudioSource (child index).
         // It is NOT the sequence index (playback order), so we don't need to map through shuffle indices.
         // We simply map the child index to our internal playlist index.
         int newIndex = _currentIndex;
         if (audioIndex >= 0 && audioIndex < _childToPlaylistIndex.length) {
           newIndex = _childToPlaylistIndex[audioIndex];
+        } else if (audioIndex >= 0 && audioIndex < _playlist.length) {
+          // Fallback for contiguous queues when mapping hasn't been updated yet.
+          newIndex = audioIndex;
         }
 
         if (newIndex != _currentIndex) {
@@ -594,7 +605,42 @@ class AudioPlayerService extends ChangeNotifier {
           _preloadUpcomingSongs();
           _warmNextConnection();
           _applyEqualizerSettings();
+
+          // Incrementally extend the in-memory queue to keep transitions smooth
+          // without rebuilding the entire audio source mid-playback.
+          _enqueueInsertion(() => _appendContiguousReadyTail(maxToAppend: 2));
         }
+      }
+    });
+
+    // Keep metadata in sync with what the player is actually playing by
+    // reading the current MediaItem tag from the sequence state.
+    _player.sequenceStateStream.listen((seqState) {
+      final currentSource = seqState?.currentSource;
+      final tag = currentSource?.tag;
+      if (tag is! MediaItem) return;
+
+      final String videoId =
+          (tag.extras is Map && (tag.extras as Map).containsKey('videoId'))
+              ? ((tag.extras as Map)['videoId'] as String? ?? tag.id)
+              : tag.id;
+
+      int newIndex = _playlist.indexWhere((t) => t.videoId == videoId);
+      if (newIndex < 0) {
+        final audioIndex = seqState?.currentIndex;
+        if (audioIndex != null &&
+            audioIndex >= 0 &&
+            audioIndex < _childToPlaylistIndex.length) {
+          newIndex = _childToPlaylistIndex[audioIndex];
+        }
+      }
+      if (newIndex < 0 || newIndex >= _playlist.length) return;
+
+      if (newIndex != _currentIndex) {
+        _currentIndex = newIndex;
+        _currentTrackController.add(currentTrack);
+        _emitTrackInfo(force: true);
+        notifyListeners();
       }
     });
 
@@ -731,7 +777,7 @@ class AudioPlayerService extends ChangeNotifier {
     Future<StreamingData?>? firstTrackFuture;
     if (cappedInitialIndex >= 0 && cappedInitialIndex < cappedTracks.length) {
       final t = cappedTracks[cappedInitialIndex];
-      if (!t.isReady || t.streamUrl == null) {
+      if (!t.isLocal && (!t.isReady || t.streamUrl == null)) {
         firstTrackFuture = _streamingService.fetchStreamingData(
           t.videoId,
           _getPreferredQuality(),
@@ -740,8 +786,12 @@ class AudioPlayerService extends ChangeNotifier {
     }
 
     // If we are actually replacing with a different queue and caller requests
-    // a smooth transition, stop first so old audio stops immediately.
+    // a smooth transition, pause+stop first so old audio stops immediately.
+    // (Some devices/backends behave better when paused before stop.)
     if (withTransition) {
+      try {
+        await _player.pause();
+      } catch (_) {}
       try {
         await _player.stop();
       } catch (_) {}
@@ -793,7 +843,9 @@ class AudioPlayerService extends ChangeNotifier {
       // If explicitly playing downloads or offline mode is enabled, use the dedicated offline pipeline.
       // This bypasses network resolution, caching, and complex isolate logic.
       final settings = SettingsService();
-      if (sourceType == 'DOWNLOADS' || settings.offlineMode) {
+      if (sourceType == 'DOWNLOADS' ||
+          sourceType == 'OFFLINE' ||
+          settings.offlineMode) {
         await _loadOfflinePlaylist(requestId: requestId, autoPlay: autoPlay);
         return true;
       }
@@ -816,24 +868,31 @@ class AudioPlayerService extends ChangeNotifier {
         }
 
         Future<void> resolveIndex(int idx) async {
-          if (_playlist[idx].isReady && _playlist[idx].streamUrl != null) {
+          final existing = _playlist[idx];
+          if (existing.isLocal && existing.streamUrl != null) {
+            // Never resolve local tracks via network.
+            if (!existing.isReady) {
+              _playlist[idx] = existing.copyWith(isAvailable: true);
+            }
+            return;
+          }
+          if (existing.isReady && existing.streamUrl != null) {
             return;
           }
           final r = await _streamingService.fetchStreamingData(
-            _playlist[idx].videoId,
+            existing.videoId,
             quality,
           );
           if (r != null) {
-            final old = _playlist[idx];
-            _playlist[idx] = old.copyWith(
+            _playlist[idx] = existing.copyWith(
               streamUrl: r.streamUrl,
               quality: r.quality,
               cachedAt: r.cachedAt,
               isAvailable: true,
-              title: old.title.isNotEmpty ? old.title : r.title,
-              artist: old.artist.isNotEmpty ? old.artist : r.artist,
-              duration: old.duration ?? r.duration,
-              thumbnailUrl: r.thumbnailUrl ?? old.thumbnailUrl,
+              title: existing.title.isNotEmpty ? existing.title : r.title,
+              artist: existing.artist.isNotEmpty ? existing.artist : r.artist,
+              duration: existing.duration ?? r.duration,
+              thumbnailUrl: r.thumbnailUrl ?? existing.thumbnailUrl,
             );
           }
         }
@@ -896,6 +955,11 @@ class AudioPlayerService extends ChangeNotifier {
           await resolveIndex(idx);
         }
 
+        // After resolving neighbors, try to extend the current audio queue
+        // (cheap append) rather than rebuilding sources.
+        if (requestId != _loadRequestId) return false;
+        _enqueueInsertion(() => _appendContiguousReadyTail(maxToAppend: 2));
+
         // Fire-and-forget background resolution of remaining tracks
         final remaining = <int>[];
         for (int i = 0; i < _playlist.length; i++) {
@@ -914,13 +978,8 @@ class AudioPlayerService extends ChangeNotifier {
               await Future.wait(futures, eagerError: false);
             } catch (_) {}
             if (requestId != _loadRequestId) return;
-            try {
-              await _rebuildAudioSource(
-                preferPlaylistIndex: _currentIndex,
-                preservePosition: true,
-                requestId: requestId,
-              );
-            } catch (_) {}
+            // Avoid rebuilding the full source here; append a small tail if ready.
+            _enqueueInsertion(() => _appendContiguousReadyTail(maxToAppend: 4));
             _warmNextConnection();
           }();
         } else {
@@ -932,13 +991,8 @@ class AudioPlayerService extends ChangeNotifier {
           if (!largeAndProgressive) {
             () async {
               if (requestId != _loadRequestId) return;
-              try {
-                await _rebuildAudioSource(
-                  preferPlaylistIndex: _currentIndex,
-                  preservePosition: true,
-                  requestId: requestId,
-                );
-              } catch (_) {}
+              _enqueueInsertion(
+                  () => _appendContiguousReadyTail(maxToAppend: 4));
               _warmNextConnection();
             }();
           }
@@ -1110,6 +1164,15 @@ class AudioPlayerService extends ChangeNotifier {
     final futures = <Future<void>>[];
     for (int i = 0; i < _playlist.length; i++) {
       if (_playlist[i].isReady && _playlist[i].streamUrl != null) continue;
+
+      // Local tracks should never be resolved via network.
+      if (_playlist[i].isLocal) {
+        final t = _playlist[i];
+        if (t.streamUrl != null && !t.isAvailable) {
+          _playlist[i] = t.copyWith(isAvailable: true);
+        }
+        continue;
+      }
 
       // Skip network fetch if offline mode is enabled
       if (settings.offlineMode && !_playlist[i].isLocal) continue;
@@ -1991,15 +2054,29 @@ class AudioPlayerService extends ChangeNotifier {
   }
 
   Uri _toPlayableUri(String urlOrPath, {bool isLocal = false}) {
+    final v = urlOrPath.trim();
+
+    // Android MediaStore URIs for scoped storage playback.
+    if (v.startsWith('content://')) {
+      return Uri.parse(v);
+    }
+
+    if (v.startsWith('file://')) {
+      return Uri.parse(v);
+    }
+
     if (isLocal) {
-      final file = File(urlOrPath);
+      // Treat as a file path.
+      final file = File(v);
       return Uri.file(file.path);
     }
-    // If it looks like a file path, prefer file URI
-    if (urlOrPath.startsWith('/') || urlOrPath.contains('\\')) {
-      return Uri.file(urlOrPath);
+
+    // If it looks like a file path, prefer file URI.
+    if (v.startsWith('/') || v.contains('\\')) {
+      return Uri.file(v);
     }
-    return Uri.parse(urlOrPath);
+
+    return Uri.parse(v);
   }
 
   /// Dispose resources
@@ -2085,6 +2162,90 @@ class AudioPlayerService extends ChangeNotifier {
     if (autoPlay) {
       await _player.play();
     }
+
+    // Resolve & append the next track(s) in the background for seamless advance.
+    // This avoids full rebuilds that can cause stutters/repeats.
+    final int requestId = _loadRequestId;
+    () async {
+      final next = playlistIndex + 1;
+      if (next >= _playlist.length) return;
+      try {
+        final existing = _playlist[next];
+        if (!existing.isLocal &&
+            (!existing.isReady || existing.streamUrl == null)) {
+          final r = await _streamingService.fetchStreamingData(
+            existing.videoId,
+            _getPreferredQuality(),
+          );
+          if (r != null && next < _playlist.length) {
+            _playlist[next] = existing.copyWith(
+              streamUrl: r.streamUrl,
+              quality: r.quality,
+              cachedAt: r.cachedAt,
+              isAvailable: true,
+              title: existing.title.isNotEmpty ? existing.title : r.title,
+              artist: existing.artist.isNotEmpty ? existing.artist : r.artist,
+              duration: existing.duration ?? r.duration,
+              thumbnailUrl: r.thumbnailUrl ?? existing.thumbnailUrl,
+            );
+          }
+        }
+      } catch (_) {}
+      if (requestId != _loadRequestId) return;
+      _enqueueInsertion(() => _appendContiguousReadyTail(maxToAppend: 2));
+    }();
+  }
+
+  Future<void> _appendContiguousReadyTail({int maxToAppend = 2}) async {
+    if (maxToAppend <= 0) return;
+    if (_player.shuffleModeEnabled) return;
+
+    final currentSource = _player.audioSource;
+    if (currentSource is! ConcatenatingAudioSource) return;
+
+    if (_childToPlaylistIndex.isEmpty) return;
+    final lastPlaylistIndex = _childToPlaylistIndex.last;
+    if (lastPlaylistIndex < 0 || lastPlaylistIndex >= _playlist.length) return;
+
+    final indicesToAdd = <int>[];
+    for (int idx = lastPlaylistIndex + 1;
+        idx < _playlist.length && indicesToAdd.length < maxToAppend;
+        idx++) {
+      final t = _playlist[idx];
+      if (!t.isReady || t.streamUrl == null) break; // keep contiguous window
+      indicesToAdd.add(idx);
+    }
+    if (indicesToAdd.isEmpty) return;
+
+    final sources = <AudioSource>[];
+    for (final idx in indicesToAdd) {
+      final t = _playlist[idx];
+      final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
+      final tag = MediaItem(
+        id: t.videoId,
+        title: t.title,
+        artist: t.artist,
+        duration: t.duration,
+        artUri: t.thumbnailUrl != null ? Uri.tryParse(t.thumbnailUrl!) : null,
+        extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
+      );
+
+      final useCache = !t.isLocal && uri.scheme.startsWith('http');
+      if (useCache) {
+        sources.add(
+          LockCachingAudioSource(
+            uri,
+            tag: tag,
+            headers: _headers,
+          ),
+        );
+      } else {
+        sources.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+      }
+    }
+
+    await currentSource.addAll(sources);
+    _childToPlaylistIndex = [..._childToPlaylistIndex, ...indicesToAdd];
   }
 
   // Serialize insertion operations to avoid race conditions with just_audio internal queue
@@ -2093,13 +2254,14 @@ class AudioPlayerService extends ChangeNotifier {
   }
 
   Future<void> _insertResolvedTrack(int playlistIndex) async {
-    // Simplified: rebuild full source to include newly ready track
     if (playlistIndex < 0 || playlistIndex >= _playlist.length) return;
     if (!(_playlist[playlistIndex].isReady &&
         _playlist[playlistIndex].streamUrl != null)) {
       return;
     }
-    await _rebuildAudioSource(preservePosition: true);
+
+    // Prefer cheap tail-append to avoid stutters/restarts.
+    await _appendContiguousReadyTail(maxToAppend: 6);
     _materializedIndices.add(playlistIndex);
   }
 

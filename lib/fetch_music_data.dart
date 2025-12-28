@@ -38,10 +38,14 @@ class MusicStreamingService {
   final YoutubeExplode _yt;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
 
+  static bool _isLocalId(String videoId) {
+    return videoId.startsWith('local_') || videoId.startsWith('local:');
+  }
+
   MusicStreamingService()
-    : _dio = DioClient.instance,
-      _semaphore = Semaphore(_maxConcurrentRequests),
-      _yt = YoutubeExplode() {
+      : _dio = DioClient.instance,
+        _semaphore = Semaphore(_maxConcurrentRequests),
+        _yt = YoutubeExplode() {
     _initConnectivity();
   }
 
@@ -63,15 +67,14 @@ class MusicStreamingService {
 
   void _adjustConcurrencyFor(List<ConnectivityResult> results) {
     // If any WiFi/Ethernet present, allow more concurrency; if only mobile, reduce.
-    final hasWifi =
-        results.contains(ConnectivityResult.wifi) ||
+    final hasWifi = results.contains(ConnectivityResult.wifi) ||
         results.contains(ConnectivityResult.ethernet);
     final hasMobile = results.contains(ConnectivityResult.mobile);
     final newMax = hasWifi
         ? 6
         : hasMobile
-        ? 3
-        : 2; // very conservative when offline/unknown
+            ? 3
+            : 2; // very conservative when offline/unknown
     _semaphore.updateMaxCount(newMax);
   }
 
@@ -85,6 +88,10 @@ class MusicStreamingService {
     final failed = <String>[];
     final futures = <Future<void>>[];
     for (final id in videoIds) {
+      if (_isLocalId(id)) {
+        failed.add(id);
+        continue;
+      }
       futures.add(() async {
         final r = await _processVideoId(id, quality);
         if (r != null) {
@@ -110,6 +117,7 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     // Check memory cache first
     StreamingData? cached = _streamCache[videoId];
     // If not in memory, try persistent cache
@@ -165,6 +173,7 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     for (int attempt = 1; attempt <= _retryAttempts; attempt++) {
       try {
         final result = await _fetchStreamingDataHedged(videoId, quality);
@@ -186,6 +195,10 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    // Guard: local device tracks should never be resolved via network.
+    if (_isLocalId(videoId)) {
+      return null;
+    }
     // If there is an inflight fetch, reuse it to avoid duplicate work
     final existing = _inflight[videoId];
     if (existing != null) return existing;
@@ -215,6 +228,10 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    // Guard: local device tracks should never be resolved via network.
+    if (_isLocalId(videoId)) {
+      return null;
+    }
     try {
       final fresh = await _fetchStreamingDataHedgedWithRetry(videoId, quality);
       if (fresh != null) {
@@ -242,6 +259,7 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     final sw = Stopwatch()..start();
     // Launch primary immediately
     final okatsuFuture = _fetchFromOkatsu(videoId, quality);
@@ -272,19 +290,17 @@ class MusicStreamingService {
     }
 
     for (final f in futures) {
-      f
-          .then((value) {
-            if (value != null && !completer.isCompleted) {
-              completer.complete(value);
-            } else {
-              remaining--;
-              tryComplete();
-            }
-          })
-          .catchError((_) {
-            remaining--;
-            tryComplete();
-          });
+      f.then((value) {
+        if (value != null && !completer.isCompleted) {
+          completer.complete(value);
+        } else {
+          remaining--;
+          tryComplete();
+        }
+      }).catchError((_) {
+        remaining--;
+        tryComplete();
+      });
     }
     return completer.future;
   }
@@ -312,6 +328,7 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     final youtubeUrl = 'https://www.youtube.com/watch?v=$videoId';
 
     // Try multiple Keith API variants to improve resilience
@@ -386,6 +403,7 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     final youtubeUrl = 'https://www.youtube.com/watch?v=$videoId';
     try {
       final response = await _dio.get(
@@ -461,13 +479,15 @@ class MusicStreamingService {
     String videoId,
     StreamingQuality quality,
   ) async {
+    if (_isLocalId(videoId)) return null;
     try {
       final videoFuture = _yt.videos.get(videoId);
       final manifestFuture = _yt.videos.streamsClient.getManifest(videoId);
       final results = await Future.wait([
         videoFuture,
         manifestFuture,
-      ], eagerError: false).timeout(const Duration(seconds: 15));
+      ], eagerError: false)
+          .timeout(const Duration(seconds: 15));
       final video = results[0] as Video;
       final manifest = results[1] as StreamManifest;
 
@@ -501,21 +521,17 @@ class MusicStreamingService {
       AudioStreamInfo? audioStream = preferred
           .where((s) => s.bitrate.bitsPerSecond >= minBps)
           .fold<AudioStreamInfo?>(null, (best, s) {
-            if (best == null) return s;
-            return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond
-                ? s
-                : best;
-          });
+        if (best == null) return s;
+        return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond ? s : best;
+      });
 
       // If none in preferred container, try alternatives with same threshold
       audioStream ??= alt
           .where((s) => s.bitrate.bitsPerSecond >= minBps)
           .fold<AudioStreamInfo?>(null, (best, s) {
-            if (best == null) return s;
-            return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond
-                ? s
-                : best;
-          });
+        if (best == null) return s;
+        return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond ? s : best;
+      });
 
       // Final fallback to absolutely highest bitrate
       audioStream ??= manifest.audioOnly.withHighestBitrate();
@@ -580,7 +596,9 @@ class Semaphore {
   int _currentCount;
   final Queue<Completer<void>> _waitQueue = Queue<Completer<void>>();
 
-  Semaphore(int maxCount) : _maxCount = maxCount, _currentCount = maxCount;
+  Semaphore(int maxCount)
+      : _maxCount = maxCount,
+        _currentCount = maxCount;
 
   int get maxCount => _maxCount;
 
@@ -632,10 +650,8 @@ class Semaphore {
 Future<String?> getDownloadUrl(String videoId) async {
   final service = MusicStreamingService();
   try {
-    final result = await service._fetchStreamingDataHedgedWithRetry(
-      videoId,
-      StreamingQuality.medium,
-    );
+    final result =
+        await service.fetchStreamingData(videoId, StreamingQuality.medium);
     return result?.streamUrl;
   } finally {
     service.dispose();

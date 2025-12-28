@@ -1,32 +1,26 @@
-/*
+﻿/*
 Copyright (c) 2025 Wambugu Kinyua
 Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
 https://creativecommons.org/licenses/by/4.0/
 */
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:mini_music_visualizer/mini_music_visualizer.dart';
-import 'package:sautifyv2/services/audio_player_service.dart';
-import 'package:sautifyv2/services/image_cache_service.dart';
+import 'package:sautifyv2/blocs/audio_player_cubit.dart';
 
-class CurrentPlaylistScreen extends StatefulWidget {
-  final AudioPlayerService audioService;
-
-  const CurrentPlaylistScreen({super.key, required this.audioService});
-
-  @override
-  State<CurrentPlaylistScreen> createState() => _CurrentPlaylistScreenState();
-}
-
-class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
-  int? _loadingIndex;
+class CurrentPlaylistScreen extends StatelessWidget {
+  const CurrentPlaylistScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final audioCubit = context.read<AudioPlayerCubit>();
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -48,29 +42,22 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
           ),
         ),
         actions: [
-          // Shuffle button
-          AnimatedBuilder(
-            animation: widget.audioService,
-            builder: (context, _) {
-              final isShuffled = widget.audioService.isShuffleEnabled;
+          BlocBuilder<AudioPlayerCubit, AudioPlayerState>(
+            builder: (context, state) {
               return IconButton(
-                onPressed: () {
-                  widget.audioService.setShuffleModeEnabled(!isShuffled);
-                },
+                onPressed: () => audioCubit.setShuffle(!state.isShuffleEnabled),
                 icon: Icon(
                   Icons.shuffle,
-                  color: isShuffled
+                  color: state.isShuffleEnabled
                       ? colorScheme.primary
                       : Theme.of(context).iconTheme.color?.withAlpha(180),
                 ),
               );
             },
           ),
-          // Repeat button
-          AnimatedBuilder(
-            animation: widget.audioService,
-            builder: (context, _) {
-              final mode = widget.audioService.loopMode;
+          BlocBuilder<AudioPlayerCubit, AudioPlayerState>(
+            builder: (context, state) {
+              final mode = state.loopMode;
               IconData icon;
               Color? color;
               if (mode == LoopMode.one) {
@@ -88,22 +75,19 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                   final newMode = mode == LoopMode.off
                       ? LoopMode.all
                       : (mode == LoopMode.all ? LoopMode.one : LoopMode.off);
-                  widget.audioService.setLoopMode(newMode);
+                  audioCubit.setLoopMode(newMode);
                 },
                 icon: Icon(icon, color: color),
               );
             },
           ),
-          // Rebuild count only when audioService notifies (playlist changes)
-          AnimatedBuilder(
-            animation: widget.audioService,
-            builder: (context, _) {
-              final count = widget.audioService.playlist.length;
+          BlocBuilder<AudioPlayerCubit, AudioPlayerState>(
+            builder: (context, state) {
               return Padding(
                 padding: const EdgeInsets.only(right: 16),
                 child: Center(
                   child: Text(
-                    '$count songs',
+                    '${state.playlist.length} songs',
                     style: TextStyle(
                       color: Theme.of(
                         context,
@@ -117,10 +101,9 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
           ),
         ],
       ),
-      body: AnimatedBuilder(
-        animation: widget.audioService,
-        builder: (context, _) {
-          final playlist = widget.audioService.playlist;
+      body: BlocBuilder<AudioPlayerCubit, AudioPlayerState>(
+        builder: (context, state) {
+          final playlist = state.playlist;
 
           if (playlist.isEmpty) {
             return Center(
@@ -147,9 +130,6 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
             );
           }
 
-          // Use the service's playlist index (shuffle-aware mapping)
-          final currentIndex = widget.audioService.currentIndex;
-
           return SafeArea(
             bottom: true,
             child: Padding(
@@ -170,210 +150,118 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
                     bottom: 8 + MediaQuery.of(context).padding.bottom,
                   ),
                   itemCount: playlist.length,
-                  /*  separatorBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(height: 1, color: txtcolor.withAlpha(40)),
-                  ),*/
                   itemBuilder: (context, index) {
                     final track = playlist[index];
-                    final isCurrentTrack = index == currentIndex;
-                    final isLoading = _loadingIndex == index;
+                    final isCurrentTrack = index == state.currentIndex;
 
                     return Container(
                       color: isCurrentTrack
                           ? colorScheme.primary.withAlpha(30)
                           : Colors.transparent,
-                      child: InkWell(
+                      child: ListTile(
                         onTap: () async {
-                          if (index != currentIndex && _loadingIndex == null) {
-                            setState(() => _loadingIndex = index);
-                            try {
-                              final success = await widget.audioService.seek(
-                                Duration.zero,
-                                index: index,
-                              );
-                              if (context.mounted) {
-                                if (success) {
-                                  Navigator.pop(context);
-                                } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Unable to play track. Please try again.',
-                                      ),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                }
-                              }
-                            } finally {
-                              if (mounted) {
-                                setState(() => _loadingIndex = null);
+                          if (index != state.currentIndex) {
+                            final success = await audioCubit.seek(Duration.zero,
+                                index: index);
+                            if (context.mounted) {
+                              if (success) {
+                                Navigator.pop(context);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Unable to play track. Please try again.'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
                               }
                             }
                           }
                         },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              // Artwork
-                              M3Container.square(
-                                /*   width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(10),
-                                  color: cardcolor,
-                                ),*/
-                                child: isLoading
-                                    ? SizedBox(
-                                        width: 48,
-                                        height: 48,
-                                        child: Center(
-                                          child: LoadingIndicatorM3E(
-                                            color: colorScheme.primary,
-                                            constraints: const BoxConstraints(
-                                              maxWidth: 24,
-                                              maxHeight: 24,
-                                            ),
-                                            // polygons: [MaterialShapes.pill],
-                                          ),
-                                        ),
-                                      )
-                                    : (track.thumbnailUrl != null
-                                          ? CachedNetworkImage(
-                                              placeholder: M3Container.square(
-                                                color: Theme.of(context)
-                                                    .scaffoldBackgroundColor
-                                                    .withAlpha(155),
-                                                child: LoadingIndicatorM3E(
-                                                  color: colorScheme.primary
-                                                      .withAlpha(155),
-                                                ),
-                                              ),
-                                              imageUrl: track.thumbnailUrl!,
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                              fit: BoxFit.cover,
-                                              width: 48,
-                                              height: 48,
-                                              errorWidget: Icon(
-                                                Icons.music_note,
-                                                color: Theme.of(context)
-                                                    .iconTheme
-                                                    .color
-                                                    ?.withAlpha(180),
-                                                size: 24,
-                                              ),
-                                            )
-                                          : Icon(
-                                              Icons.music_note,
-                                              color: Theme.of(
-                                                context,
-                                              ).iconTheme.color?.withAlpha(180),
-                                              size: 24,
-                                            )),
-                              ),
-
-                              const SizedBox(width: 12),
-
-                              // Title + artist/duration
-                              Expanded(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      track.title,
-                                      style: TextStyle(
-                                        color: isCurrentTrack
-                                            ? colorScheme.primary
-                                            : Theme.of(
-                                                context,
-                                              ).textTheme.bodyLarge?.color,
-                                        fontSize: 15,
-                                        fontWeight: isCurrentTrack
-                                            ? FontWeight.bold
-                                            : FontWeight.w600,
+                        leading: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: M3Container.square(
+                            width: 56,
+                            height: 56,
+                            child: track.thumbnailUrl != null
+                                ? CachedNetworkImage(
+                                    placeholder: (context, url) =>
+                                        M3Container.square(
+                                      color: Theme.of(context)
+                                          .scaffoldBackgroundColor
+                                          .withAlpha(155),
+                                      child: LoadingIndicatorM3E(
+                                        color:
+                                            colorScheme.primary.withAlpha(155),
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                    const SizedBox(height: 2),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            track.artist,
-                                            style: TextStyle(
-                                              color: isCurrentTrack
-                                                  ? colorScheme.primary
-                                                        .withAlpha(180)
-                                                  : Theme.of(context)
-                                                        .textTheme
-                                                        .bodyMedium
-                                                        ?.color
-                                                        ?.withAlpha(180),
-                                              fontSize: 13,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        if (track.duration != null) ...[
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            _formatDuration(track.duration!),
-                                            style: TextStyle(
-                                              color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyMedium
-                                                  ?.color
-                                                  ?.withAlpha(120),
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
+                                    imageUrl: track.thumbnailUrl!,
+                                    fit: BoxFit.cover,
+                                    width: 48,
+                                    height: 48,
+                                    errorWidget: (context, url, error) => Icon(
+                                      Icons.music_note,
+                                      color: Theme.of(context)
+                                          .iconTheme
+                                          .color
+                                          ?.withAlpha(180),
+                                      size: 24,
                                     ),
-                                  ],
-                                ),
-                              ),
-
-                              const SizedBox(width: 12),
-
-                              // Trailing: now-playing indicator + index
-                              if (isCurrentTrack)
-                                MiniMusicVisualizer(
-                                  color: colorScheme.primary.withAlpha(250),
-                                  width: 4,
-                                  height: 15,
-                                  animate: true,
-                                ),
-                              if (isCurrentTrack) const SizedBox(width: 8),
-                              Text(
-                                '${index + 1}',
-                                style: TextStyle(
-                                  color: isCurrentTrack
-                                      ? colorScheme.primary
-                                      : Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.color
-                                            ?.withAlpha(120),
-                                  fontSize: 13,
-                                  fontWeight: isCurrentTrack
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ],
+                                  )
+                                : Icon(
+                                    Icons.music_note,
+                                    color: Theme.of(context)
+                                        .iconTheme
+                                        .color
+                                        ?.withAlpha(180),
+                                    size: 24,
+                                  ),
                           ),
                         ),
+                        title: Text(
+                          track.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isCurrentTrack
+                                ? colorScheme.primary
+                                : Theme.of(context).textTheme.bodyLarge?.color,
+                            fontSize: 15,
+                            fontWeight: isCurrentTrack
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isCurrentTrack
+                                ? colorScheme.primary.withAlpha(180)
+                                : Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.color
+                                    ?.withAlpha(180),
+                            fontSize: 13,
+                          ),
+                        ),
+                        trailing: isCurrentTrack
+                            ? SizedBox(
+                                width: 40,
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: MiniMusicVisualizer(
+                                    animate: true,
+                                    color: colorScheme.primary,
+                                    width: 4,
+                                    height: 15,
+                                  ),
+                                ),
+                              )
+                            : null,
                       ),
                     );
                   },
@@ -384,12 +272,5 @@ class _CurrentPlaylistScreenState extends State<CurrentPlaylistScreen> {
         },
       ),
     );
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
-    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
-    return "$twoDigitMinutes:$twoDigitSeconds";
   }
 }

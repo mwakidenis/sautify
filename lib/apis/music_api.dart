@@ -18,6 +18,10 @@ class Api implements MusicAPI {
 
   @override
   Future<String> getDownloadUrl(String videoId) async {
+    if (videoId.startsWith('local_') || videoId.startsWith('local:')) {
+      throw Exception(
+          'Local tracks are offline and do not have a download URL.');
+    }
     // 1) Try unified streaming service (with cache + fallback providers)
     try {
       final StreamingData? data = await _service.fetchStreamingData(

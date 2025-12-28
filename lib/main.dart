@@ -11,30 +11,35 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:navigation_bar_m3e/navigation_bar_m3e.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
+import 'package:sautifyv2/blocs/audio_player_cubit.dart';
+import 'package:sautifyv2/blocs/device_library/device_library_cubit.dart';
+import 'package:sautifyv2/blocs/download/download_cubit.dart';
+import 'package:sautifyv2/blocs/home/home_cubit.dart';
+import 'package:sautifyv2/blocs/library/library_cubit.dart';
+import 'package:sautifyv2/blocs/player/player_cubit.dart';
+import 'package:sautifyv2/blocs/search/search_bloc.dart';
+import 'package:sautifyv2/blocs/settings/settings_cubit.dart';
+import 'package:sautifyv2/blocs/settings/settings_state.dart';
+import 'package:sautifyv2/blocs/theme/theme_cubit.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 // flutter_localizations are included via AppLocalizations.localizationsDelegates
 import 'package:sautifyv2/l10n/app_localizations.dart';
-import 'package:sautifyv2/providers/set_dynamic_colors.dart';
 import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/dio_client.dart';
 import 'package:sautifyv2/services/widget_service.dart';
 import 'package:sautifyv2/widgets/mini_player.dart';
 
-// Legacy lightweight i18n helper is still used in other screens; not needed here
-// import 'l10n/strings.dart';
-import 'providers/library_provider.dart';
 import 'screens/downloads_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/image_cache_service.dart';
-import 'services/settings_service.dart';
 import 'utils/app_config.dart';
 import 'utils/http_overrides.dart';
 import 'utils/restart_widget.dart';
@@ -74,8 +79,7 @@ void main() async {
 
   // Also cap Flutter's built-in ImageCache to limit decoded frames in memory
   PaintingBinding.instance.imageCache
-    ..maximumSize =
-        100 // max number of images+
+    ..maximumSize = 100 // max number of images+
     ..maximumSizeBytes = 30 * 1024 * 1024; // ~30MB decoded bytes
 
   // Request runtime permission for notifications on Android 13+
@@ -91,16 +95,13 @@ void main() async {
       androidNotificationOngoing: true,
       androidShowNotificationBadge: true,
       preloadArtwork: true,
-
       androidNotificationIcon: 'mipmap/ic_launcher',
     );
   }
 
   // Load settings to decide audio backend before creating any AudioPlayer
-  final settings = SettingsService();
-  if (!settings.isReady) {
-    await settings.init();
-  }
+  final settingsCubit = SettingsCubit();
+  await settingsCubit.init();
 
   // Initialize the AudioPlayerService singleton
   final audioService = AudioPlayerService();
@@ -111,7 +112,7 @@ void main() async {
     WidgetService().init();
   }
 
-  runApp(const RestartWidget(child: MainApp()));
+  runApp(RestartWidget(child: MainApp(settingsCubit: settingsCubit)));
 }
 
 // Filters a specific, known-to-be-benign debug assertion spam from MouseTracker
@@ -123,8 +124,7 @@ void _installMouseTrackerAssertWorkaround() {
   final prev = FlutterError.onError;
   FlutterError.onError = (FlutterErrorDetails details) {
     final text = details.exceptionAsString();
-    final isMouseTrackerSpam =
-        text.contains('mouse_tracker.dart') &&
+    final isMouseTrackerSpam = text.contains('mouse_tracker.dart') &&
         text.contains("'!_debugDuringDeviceUpdate': is not true");
     if (isMouseTrackerSpam) {
       // Log once per occurrence at a low priority instead of throwing
@@ -138,7 +138,8 @@ void _installMouseTrackerAssertWorkaround() {
 }
 
 class MainApp extends StatefulWidget {
-  const MainApp({super.key});
+  final SettingsCubit settingsCubit;
+  const MainApp({super.key, required this.settingsCubit});
 
   @override
   State<MainApp> createState() => _MainAppState();
@@ -221,8 +222,7 @@ class _MainAppState extends State<MainApp> {
         List<ConnectivityResult> results,
       ) {
         if (!mounted) return;
-        final offline =
-            results.isEmpty ||
+        final offline = results.isEmpty ||
             results.every((c) => c == ConnectivityResult.none);
         if (offline) {
           _safeToast(
@@ -246,6 +246,30 @@ class _MainAppState extends State<MainApp> {
     return Locale(parts[0], parts[1]);
   }
 
+  TextTheme _buildAppTextTheme(BuildContext context, String fontKey) {
+    final base = ThemeData(brightness: Brightness.dark)
+        .textTheme
+        .apply(bodyColor: txtcolor, displayColor: txtcolor);
+
+    switch (fontKey) {
+      case 'system':
+        return base;
+      case 'inter':
+        return GoogleFonts.interTextTheme(base);
+      case 'roboto':
+        return GoogleFonts.robotoTextTheme(base);
+      case 'dm_sans':
+        return GoogleFonts.dmSansTextTheme(base);
+      case 'manrope':
+        return GoogleFonts.manropeTextTheme(base);
+      case 'noto_sans':
+        return GoogleFonts.notoSansTextTheme(base);
+      case 'poppins':
+      default:
+        return GoogleFonts.poppinsTextTheme(base);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -255,28 +279,37 @@ class _MainAppState extends State<MainApp> {
       const SettingsScreen(),
     ];
 
-    return MultiProvider(
+    return MultiBlocProvider(
       providers: [
-        // Expose the singleton audio service to the widget tree
-        ChangeNotifierProvider<AudioPlayerService>.value(
-          value: AudioPlayerService(),
+        BlocProvider<SettingsCubit>.value(value: widget.settingsCubit),
+        BlocProvider<LibraryCubit>(
+          create: (_) => LibraryCubit()..init(),
         ),
-        ChangeNotifierProvider<LibraryProvider>(
-          create: (_) => LibraryProvider()..init(),
+        BlocProvider<ThemeCubit>(create: (_) => ThemeCubit()),
+        BlocProvider<AudioPlayerCubit>(
+          create: (_) => AudioPlayerCubit(AudioPlayerService()),
         ),
-        // Use the already-initialized singleton and prevent Provider from disposing it
-        ChangeNotifierProvider<SettingsService>.value(value: SettingsService()),
-        ChangeNotifierProvider(create: (context) => SetColors()),
+        BlocProvider<DeviceLibraryCubit>(
+          create: (_) => DeviceLibraryCubit()..init(),
+        ),
+        BlocProvider<SearchBloc>(create: (_) => SearchBloc()),
+        BlocProvider<HomeCubit>(create: (_) => HomeCubit()),
+        BlocProvider<DownloadCubit>(
+          create: (_) => DownloadCubit(widget.settingsCubit)..init(),
+        ),
+        BlocProvider<PlayerCubit>(
+          create: (context) => PlayerCubit(context.read<ThemeCubit>()),
+        ),
       ],
-      child: Consumer<SettingsService>(
-        builder: (context, settings, _) {
+      child: BlocBuilder<SettingsCubit, SettingsState>(
+        builder: (context, settings) {
           // Logic to determine if we should use dynamic theme
           Color? seedColor;
           if (settings.dynamicThemeEnabled) {
-            // Only watch SetColors if enabled
-            final setColors = context.watch<SetColors>();
-            if (setColors.primaryColors.isNotEmpty) {
-              seedColor = setColors.primaryColors[0];
+            // Only watch ThemeCubit if enabled
+            final themeState = context.watch<ThemeCubit>().state;
+            if (themeState.primaryColors.isNotEmpty) {
+              seedColor = themeState.primaryColors[0];
             }
           }
 
@@ -284,6 +317,7 @@ class _MainAppState extends State<MainApp> {
               settings.dynamicThemeEnabled && seedColor != null;
 
           final ThemeData theme;
+          final appTextTheme = _buildAppTextTheme(context, settings.appFont);
           if (useDynamic) {
             theme = ThemeData(
               useMaterial3: true,
@@ -292,11 +326,7 @@ class _MainAppState extends State<MainApp> {
                 brightness: Brightness.dark,
                 primary: seedColor,
               ),
-              textTheme: GoogleFonts.poppinsTextTheme(
-                Theme.of(
-                  context,
-                ).textTheme.apply(bodyColor: txtcolor, displayColor: txtcolor),
-              ),
+              textTheme: appTextTheme,
               snackBarTheme: SnackBarThemeData(
                 backgroundColor: seedColor,
                 elevation: 8.0,
@@ -331,11 +361,7 @@ class _MainAppState extends State<MainApp> {
                 elevation: 0,
                 iconTheme: IconThemeData(color: iconcolor),
               ),
-              textTheme: GoogleFonts.poppinsTextTheme(
-                Theme.of(
-                  context,
-                ).textTheme.apply(bodyColor: txtcolor, displayColor: txtcolor),
-              ),
+              textTheme: appTextTheme,
               snackBarTheme: SnackBarThemeData(
                 backgroundColor: appbarcolor,
                 elevation: 8.0,
@@ -401,7 +427,6 @@ class _MainAppState extends State<MainApp> {
                           shapeFamily: NavBarM3EShapeFamily.square,
                           indicatorColor: navIndicatorColor,
                           backgroundColor: navBgColor,
-
                           selectedIndex: _tab,
                           onDestinationSelected: (i) =>
                               setState(() => _tab = i),

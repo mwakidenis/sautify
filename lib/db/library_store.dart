@@ -13,12 +13,15 @@ import 'package:sautifyv2/models/stats_model.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 
 class LibraryStore {
+  static final Map<String, Future<Box<String>>> _boxFutures =
+      <String, Future<Box<String>>>{};
+
   static Future<Box<String>> _openBox(String name) async {
-    // Ensure Hive initialized
-    await HiveBoxes.init();
-    return Hive.isBoxOpen(name)
-        ? Hive.box<String>(name)
-        : await Hive.openBox<String>(name);
+    return _boxFutures[name] ??= () async {
+      await HiveBoxes.init();
+      if (Hive.isBoxOpen(name)) return Hive.box<String>(name);
+      return Hive.openBox<String>(name);
+    }();
   }
 
   // Recents
@@ -84,9 +87,8 @@ class LibraryStore {
 
   static Future<List<SongStats>> getMostPlayed({int limit = 20}) async {
     final box = await _openBox(HiveBoxes.stats);
-    final allStats = box.values
-        .map((e) => SongStats.fromJson(jsonDecode(e)))
-        .toList();
+    final allStats =
+        box.values.map((e) => SongStats.fromJson(jsonDecode(e))).toList();
     allStats.sort((a, b) => b.playCount.compareTo(a.playCount));
     return allStats.take(limit).toList();
   }

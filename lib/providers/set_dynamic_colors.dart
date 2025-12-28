@@ -11,6 +11,15 @@ import 'package:sautifyv2/services/image_cache_service.dart';
 
 class SetColors extends ChangeNotifier {
   List<Color> primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
+
+  final Map<String, List<Color>> _urlPaletteCache = <String, List<Color>>{};
+  final Map<int, List<Color>> _localPaletteCache = <int, List<Color>>{};
+  final Map<String, Future<List<Color>>> _inFlightUrl =
+      <String, Future<List<Color>>>{};
+  final Map<int, Future<Uint8List?>> _inFlightLocalBytes =
+      <int, Future<Uint8List?>>{};
+
+  static final OnAudioQuery _audioQuery = OnAudioQuery();
   // secondaryColor;
   //get colors
   List<Color> get getPrimaryColors => primaryColors;
@@ -21,44 +30,96 @@ class SetColors extends ChangeNotifier {
   }
 
   Future<void> getColor(String url) async {
+    final key = url.trim();
+    if (key.isEmpty) return;
+
+    final cached = _urlPaletteCache[key];
+    if (cached != null) {
+      if (!_samePalette(primaryColors, cached)) {
+        primaryColors = cached;
+        notifyListeners();
+      }
+      return;
+    }
+
     try {
-      // Run directly on main isolate to leverage shared ImageCacheService
-      final List<Color> colors = await _updatePaletteFromArtwork(url);
-      debugPrint('Colors extracted: $colors');
-      primaryColors = colors;
-      notifyListeners();
+      final fut = _inFlightUrl[key] ??= _updatePaletteFromArtwork(key);
+      final List<Color> colors = await fut;
+      _urlPaletteCache[key] = colors;
+      if (kDebugMode) debugPrint('Colors extracted: $colors');
+
+      if (!_samePalette(primaryColors, colors)) {
+        primaryColors = colors;
+        notifyListeners();
+      }
     } catch (e) {
-      debugPrint('Error extracting colors: $e');
-      primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
-      notifyListeners();
+      if (kDebugMode) debugPrint('Error extracting colors: $e');
+      final fallback = <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
+      if (!_samePalette(primaryColors, fallback)) {
+        primaryColors = fallback;
+        notifyListeners();
+      }
+    } finally {
+      _inFlightUrl.remove(key);
     }
   }
 
   Future<void> getColorFromLocalId(int id) async {
+    final cached = _localPaletteCache[id];
+    if (cached != null) {
+      if (!_samePalette(primaryColors, cached)) {
+        primaryColors = cached;
+        notifyListeners();
+      }
+      return;
+    }
+
     try {
-      final OnAudioQuery audioQuery = OnAudioQuery();
-      final bytes = await audioQuery.queryArtwork(
+      final fut = _inFlightLocalBytes[id] ??= _audioQuery.queryArtwork(
         id,
         ArtworkType.AUDIO,
         format: ArtworkFormat.JPEG,
-        size: 1000,
-        quality: 100,
+        // Only needed for palette extraction; keep smaller to reduce jank.
+        size: 256,
+        quality: 80,
       );
 
+      final Uint8List? bytes = await fut;
+
       if (bytes == null || bytes.isEmpty) {
-        primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
-        notifyListeners();
+        final fallback = <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
+        if (!_samePalette(primaryColors, fallback)) {
+          primaryColors = fallback;
+          notifyListeners();
+        }
         return;
       }
 
       final colors = await _extractColorsFromBytes(bytes);
-      primaryColors = colors;
-      notifyListeners();
+      _localPaletteCache[id] = colors;
+      if (!_samePalette(primaryColors, colors)) {
+        primaryColors = colors;
+        notifyListeners();
+      }
     } catch (e) {
-      debugPrint('Error extracting colors from local ID: $e');
-      primaryColors = [bgcolor.withAlpha(200), bgcolor, Colors.black];
-      notifyListeners();
+      if (kDebugMode) debugPrint('Error extracting colors from local ID: $e');
+      final fallback = <Color>[bgcolor.withAlpha(200), bgcolor, Colors.black];
+      if (!_samePalette(primaryColors, fallback)) {
+        primaryColors = fallback;
+        notifyListeners();
+      }
+    } finally {
+      _inFlightLocalBytes.remove(id);
     }
+  }
+
+  static bool _samePalette(List<Color> a, List<Color> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].value != b[i].value) return false;
+    }
+    return true;
   }
 
   static Future<List<Color>> _updatePaletteFromArtwork(String url) async {

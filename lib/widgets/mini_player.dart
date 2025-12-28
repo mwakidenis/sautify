@@ -7,16 +7,16 @@ https://creativecommons.org/licenses/by/4.0/
 */
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:on_audio_query/on_audio_query.dart';
-import 'package:provider/provider.dart';
-import 'package:sautifyv2/models/track_info.dart';
-import 'package:sautifyv2/providers/set_dynamic_colors.dart';
+import 'package:sautifyv2/blocs/audio_player_cubit.dart';
+import 'package:sautifyv2/blocs/theme/theme_cubit.dart';
+import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
-import 'package:sautifyv2/services/audio_player_service.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
+import 'package:sautifyv2/widgets/local_artwork_image.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
 class MiniPlayer extends StatefulWidget {
@@ -27,393 +27,283 @@ class MiniPlayer extends StatefulWidget {
 }
 
 class _MiniPlayerState extends State<MiniPlayer> {
-  bool _initialReady = false; // becomes true when first track metadata is ready
-  String? _lastProcessedUrl;
-  int? _lastProcessedId;
-
-  // Cache for artwork widget to prevent flickering
-  Widget? _cachedArtwork;
-  String? _cachedArtworkUrlKey;
-  int? _cachedArtworkIdKey;
+  StreamingData? _lastNonNullTrack;
 
   @override
   Widget build(BuildContext context) {
-    final audioService = AudioPlayerService();
+    return BlocListener<AudioPlayerCubit, AudioPlayerState>(
+      listenWhen: (prev, curr) {
+        final prevKey = _trackKey(prev.currentTrack);
+        final currKey = _trackKey(curr.currentTrack);
+        return prevKey != currKey;
+      },
+      listener: (context, state) {
+        final track = state.currentTrack;
+        if (track == null) return;
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: audioService.isPreparing,
-      builder: (context, preparing, _) {
-        return StreamBuilder<TrackInfo>(
-          stream: audioService.trackInfo$,
-          builder: (context, trackInfoSnapshot) {
-            final trackInfo = trackInfoSnapshot.data;
-            final hasTrack = trackInfo?.track != null;
+        if (track.isLocal && track.localId != null) {
+          context.read<ThemeCubit>().getColorFromLocalId(track.localId!);
+          return;
+        }
 
-            // Consider metadata available when we have duration or artwork (or both)
-            final bool metadataReady = hasTrack &&
-                ((trackInfo?.duration != null) ||
-                    ((trackInfo?.track?.thumbnailUrl ?? '').isNotEmpty) ||
-                    ((trackInfo?.title ?? '').isNotEmpty &&
-                        (trackInfo?.artist ?? '').isNotEmpty));
+        final thumb = track.thumbnailUrl;
+        if (thumb != null && thumb.isNotEmpty) {
+          context.read<ThemeCubit>().getColor(thumb);
+          return;
+        }
 
-            // Mark initial readiness once first metadata is available,
-            // or when preparation ends while a track exists (safety fallback)
-            if (!_initialReady && (metadataReady || (hasTrack && !preparing))) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() => _initialReady = true);
-              });
-            }
+        context.read<ThemeCubit>().setColors([
+          Theme.of(context).colorScheme.surface.withAlpha(200),
+          Theme.of(context).colorScheme.surface,
+          Colors.black,
+        ]);
+      },
+      child: BlocBuilder<AudioPlayerCubit, AudioPlayerState>(
+        builder: (context, state) {
+          // First load skeleton: show only when preparing and no track yet
+          if (state.isPreparing && state.currentTrack == null) {
+            return _buildSkeletonMiniPlayer(context);
+          }
 
-            // Show skeleton only during the first load while preparing
-            if (!_initialReady && preparing) {
-              return _buildSkeletonMiniPlayer();
-            }
+          final currentTrack = state.currentTrack ?? _lastNonNullTrack;
+          if (state.currentTrack != null) {
+            _lastNonNullTrack = state.currentTrack;
+          }
+          if (currentTrack == null) {
+            return const SizedBox.shrink();
+          }
 
-            // Hide if nothing to show
-            if (!hasTrack) {
-              return const SizedBox.shrink();
-            }
+          final progress = state.duration.inMilliseconds <= 0
+              ? 0.0
+              : (state.position.inMilliseconds / state.duration.inMilliseconds)
+                  .clamp(0.0, 1.0);
 
-            final currentTrack = trackInfo!.track!;
-            final progress = trackInfo.progress;
+          final pryColors = context.select<ThemeCubit, List<Color>>(
+            (cubit) => cubit.state.primaryColors,
+          );
 
-            // Logic to update colors
-            bool shouldUpdateColors = false;
-            if (currentTrack.isLocal && currentTrack.localId != null) {
-              if (currentTrack.localId != _lastProcessedId) {
-                shouldUpdateColors = true;
-                _lastProcessedId = currentTrack.localId;
-                _lastProcessedUrl = null;
-              }
-            } else if (currentTrack.thumbnailUrl != _lastProcessedUrl) {
-              shouldUpdateColors = true;
-              _lastProcessedUrl = currentTrack.thumbnailUrl;
-              _lastProcessedId = null;
-            }
+          final gradientColors = pryColors.isEmpty
+              ? <Color>[]
+              : (pryColors.length == 1
+                  ? <Color>[pryColors[0], pryColors[0]]
+                  : pryColors);
 
-            if (shouldUpdateColors) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  if (currentTrack.isLocal && currentTrack.localId != null) {
-                    context.read<SetColors>().getColorFromLocalId(
-                          currentTrack.localId!,
-                        );
-                  } else if (currentTrack.thumbnailUrl != null &&
-                      currentTrack.thumbnailUrl!.isNotEmpty) {
-                    context.read<SetColors>().getColor(
-                          currentTrack.thumbnailUrl!,
-                        );
-                  } else {
-                    context.read<SetColors>().setColors([
-                      Theme.of(context).colorScheme.surface.withAlpha(200),
-                      Theme.of(context).colorScheme.surface,
-                      Colors.black,
-                    ]);
-                  }
-                }
-              });
-            }
+          final isLoading =
+              (!state.isPlaying) && (state.isPreparing || state.isBuffering);
 
-            final pryColors = context.watch<SetColors>().getPrimaryColors;
-
-            // Update cached artwork if track changed
-            if (_cachedArtwork == null ||
-                _cachedArtworkIdKey != currentTrack.localId ||
-                _cachedArtworkUrlKey != currentTrack.thumbnailUrl) {
-              _cachedArtwork = _buildAlbumArt(currentTrack);
-              _cachedArtworkIdKey = currentTrack.localId;
-              _cachedArtworkUrlKey = currentTrack.thumbnailUrl;
-            }
-
-            return GestureDetector(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => PlayerScreen(
-                      title: currentTrack.title,
-                      artist: currentTrack.artist,
-                      imageUrl: currentTrack.thumbnailUrl,
-                      // Don't pass playlist or initialIndex - just show current state
-                    ),
+          return GestureDetector(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => PlayerScreen(
+                    title: currentTrack.title,
+                    artist: currentTrack.artist,
+                    imageUrl: currentTrack.thumbnailUrl,
                   ),
-                );
-              },
-              child: Card(
-                color: Theme.of(context).colorScheme.surface.withAlpha(155),
-                elevation: 11,
-                child: Container(
-                  height: 60,
-                  margin: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: pryColors.isNotEmpty
-                          ? pryColors
-                          : [
-                              Theme.of(
-                                context,
-                              ).colorScheme.surface.withAlpha(200),
-                              Theme.of(
-                                context,
-                              ).colorScheme.surface.withAlpha(150),
-                            ],
-                      begin: Alignment.center,
-                      end: Alignment.bottomCenter,
-                      //  tileMode: TileMode.mirror,
-                    ),
-                    //  color: appbarcolor.withAlpha(
-                    //    10,
-                    // ), // Use player background color
-                    borderRadius: BorderRadius.circular(32),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surface.withAlpha(100),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                ),
+              );
+            },
+            child: Card(
+              color: Theme.of(context).colorScheme.surface.withAlpha(155),
+              elevation: 11,
+              child: Container(
+                height: 60,
+                margin: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: gradientColors.isNotEmpty
+                        ? gradientColors
+                        : [
+                            Theme.of(context)
+                                .colorScheme
+                                .surface
+                                .withAlpha(200),
+                            Theme.of(context)
+                                .colorScheme
+                                .surface
+                                .withAlpha(150),
+                          ],
+                    begin: Alignment.center,
+                    end: Alignment.bottomCenter,
                   ),
-                  child: Column(
-                    children: [
-                      //(value: 0.6),
-                      // Progress bar - now uses the synchronized progress from trackInfo
-                      Container(
-                        height: 2.5,
-                        margin: const EdgeInsets.only(left: 16, right: 16),
-                        child: /* LinearProgressIndicatorM3E(
-                          inset: 0,
-                          shape: ProgressM3EShape.flat,
-                          size: LinearProgressM3ESize.s,
-                          value: progress,
-                          trackColor: iconcolor,
-                          activeColor: appbarcolor,
-                        ),
-                        */
-                            Padding(
-                          padding: const EdgeInsets.only(left: 8.0, right: 8.0),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12.0),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              backgroundColor: Theme.of(
-                                context,
-                              ).iconTheme.color?.withAlpha(100),
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Theme.of(context).colorScheme.primary,
-                              ),
+                  borderRadius: BorderRadius.circular(32),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          Theme.of(context).colorScheme.surface.withAlpha(100),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      height: 2.5,
+                      margin: const EdgeInsets.only(left: 16, right: 16),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8.0, right: 8.0),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12.0),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            backgroundColor: Theme.of(context)
+                                .iconTheme
+                                .color
+                                ?.withAlpha(100),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).colorScheme.primary,
                             ),
                           ),
                         ),
                       ),
-
-                      // Main content
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            children: [
-                              // Album art with caching
-                              M3Container.c7SidedCookie(
-                                width: 48,
-                                height: 48,
-                                child: _cachedArtwork ??
-                                    _buildAlbumArt(currentTrack),
-                              ),
-
-                              const SizedBox(width: 12),
-
-                              // Song info
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      currentTrack.title,
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).textTheme.bodyLarge?.color,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      currentTrack.artist,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.color
-                                            ?.withAlpha(180),
-                                        fontSize: 12,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              // Previous button
-                              /*        Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(100),
-                                  color: appbarcolor.withAlpha(155),
-                                ),
-                                child: IconButton(
-                                  onPressed: () async {
-                                    await audioService.skipToPrevious();
-                                  },
-                                  icon: Icon(
-                                    Icons.skip_previous,
-                                    color: txtcolor,
-                                    size: 24,
-                                  ),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                ),*/
-
-                              //repositioned  next  button only
-                              IconButton(
-                                onPressed: () async {
-                                  await audioService.skipToNext();
-                                },
-                                icon: Icon(
-                                  Icons.skip_next,
-                                  color: Theme.of(context).iconTheme.color,
-                                  size: 28,
-                                ),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              const SizedBox(width: 8),
-                              // Play/Pause button with loading state (only when NOT playing AND preparing/loading)
-                              ValueListenableBuilder<bool>(
-                                valueListenable: audioService.isPreparing,
-                                builder: (context, preparing, _) {
-                                  return StreamBuilder<PlayerState>(
-                                    stream: audioService.playerStateStream,
-                                    builder: (context, snapshot) {
-                                      final state = snapshot.data;
-                                      final effectivePlaying = state?.playing ??
-                                          (trackInfoSnapshot.data?.isPlaying ??
-                                              false);
-                                      final engineLoading =
-                                          state?.processingState ==
-                                                  ProcessingState.loading ||
-                                              state?.processingState ==
-                                                  ProcessingState.buffering;
-                                      final isLoading = (!effectivePlaying) &&
-                                          (preparing || engineLoading);
-
-                                      if (isLoading) {
-                                        return Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4.0,
-                                          ),
-                                          child: SizedBox(
-                                            width: 28,
-                                            height: 28,
-                                            child: LoadingIndicatorM3E(
-                                              containerColor: Theme.of(
-                                                context,
-                                              ).colorScheme.surface,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary
-                                                  .withAlpha(155),
-                                            ),
-                                          ),
-                                        );
-                                      }
-
-                                      return IconButton(
-                                        style: IconButton.styleFrom(
-                                          backgroundColor: Theme.of(
-                                            context,
-                                          ).colorScheme.primary,
-                                          padding: EdgeInsets.zero,
-                                          minimumSize: const Size(32, 32),
-                                          tapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
-                                        ),
-                                        onPressed: () async {
-                                          if (effectivePlaying) {
-                                            await audioService.pause();
-                                          } else {
-                                            await audioService.play();
-                                          }
-                                        },
-                                        icon: Padding(
-                                          padding: const EdgeInsets.all(4.0),
-                                          child: Icon(
-                                            effectivePlaying
-                                                ? Icons.pause
-                                                : Icons.play_arrow,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onPrimary,
-                                            size: 28,
-                                          ),
-                                        ),
-                                      );
-                                    },
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          children: [
+                            M3Container.c7SidedCookie(
+                              width: 48,
+                              height: 48,
+                              child: BlocSelector<AudioPlayerCubit,
+                                  AudioPlayerState, StreamingData?>(
+                                selector: (s) => s.currentTrack,
+                                builder: (context, selected) {
+                                  final t = selected ?? currentTrack;
+                                  return RepaintBoundary(
+                                    child: _buildAlbumArt(context, t),
                                   );
                                 },
                               ),
-
-                              // Next button
-                              /*    Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(100),
-                                  color: appbarcolor.withAlpha(155),
-                                ),
-                                child: IconButton(
-                                  onPressed: () async {
-                                    await audioService.skipToNext();
-                                  },
-                                  icon: Icon(
-                                    Icons.skip_next,
-                                    color: txtcolor,
-                                    size: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    currentTrack.title,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge
+                                          ?.color,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  visualDensity: VisualDensity.compact,
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    currentTrack.artist,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.color
+                                          ?.withAlpha(180),
+                                      fontSize: 12,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () =>
+                                  context.read<AudioPlayerCubit>().next(),
+                              icon: Icon(
+                                Icons.skip_next,
+                                color: Theme.of(context).iconTheme.color,
+                                size: 28,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            const SizedBox(width: 8),
+                            if (isLoading)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4.0,
                                 ),
-                              ),*/
-                            ],
-                          ),
+                                child: SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: LoadingIndicatorM3E(
+                                    containerColor:
+                                        Theme.of(context).colorScheme.surface,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary
+                                        .withAlpha(155),
+                                  ),
+                                ),
+                              )
+                            else
+                              IconButton(
+                                style: IconButton.styleFrom(
+                                  backgroundColor:
+                                      Theme.of(context).colorScheme.primary,
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: const Size(32, 32),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: () => context
+                                    .read<AudioPlayerCubit>()
+                                    .togglePlayPause(),
+                                icon: Padding(
+                                  padding: const EdgeInsets.all(4.0),
+                                  child: Icon(
+                                    state.isPlaying
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
+                                    color:
+                                        Theme.of(context).colorScheme.onPrimary,
+                                    size: 28,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
-        );
-      },
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildAlbumArt(dynamic currentTrack) {
+  static String? _trackKey(dynamic track) {
+    if (track == null) return null;
+    if (track.isLocal && track.localId != null) return 'local:${track.localId}';
+    final url = track.thumbnailUrl ?? '';
+    if (url.isNotEmpty) return 'url:$url';
+    return 'title:${track.title}:${track.artist}';
+  }
+
+  static Widget _buildAlbumArt(BuildContext context, dynamic currentTrack) {
     // Handle local files with OnAudioQuery
     if (currentTrack.isLocal && currentTrack.localId != null) {
-      return QueryArtworkWidget(
+      return ClipRRect(
         key: ValueKey('local_art_${currentTrack.localId}'),
-        id: currentTrack.localId!,
-        type: ArtworkType.AUDIO,
-        artworkHeight: 48,
-        artworkWidth: 48,
-        artworkFit: BoxFit.cover,
-        artworkBorder: BorderRadius.circular(8),
-        nullArtworkWidget: Icon(
-          Icons.music_note,
-          color: Theme.of(context).iconTheme.color?.withAlpha(180),
-          size: 24,
+        borderRadius: BorderRadius.circular(8),
+        child: LocalArtworkImage(
+          localId: currentTrack.localId!,
+          type: ArtworkType.AUDIO,
+          fit: BoxFit.cover,
+          placeholder: Icon(
+            Icons.music_note,
+            color: Theme.of(context).iconTheme.color?.withAlpha(180),
+            size: 24,
+          ),
         ),
       );
     }
@@ -431,6 +321,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
           fit: BoxFit.cover,
           width: 48,
           height: 48,
+          gaplessPlayback: true,
           errorBuilder: (context, _, __) => Icon(
             Icons.music_note,
             color: Theme.of(context).iconTheme.color?.withAlpha(180),
@@ -475,7 +366,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
     );
   }
 
-  Widget _buildSkeletonMiniPlayer() {
+  static Widget _buildSkeletonMiniPlayer(BuildContext context) {
     return Container(
       height: 80,
       margin: const EdgeInsets.all(16),

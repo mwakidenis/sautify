@@ -178,19 +178,15 @@ Future<Map<String, dynamic>?> _resolveStreaming({
     AudioStreamInfo? audioStream = preferred
         .where((s) => s.bitrate.bitsPerSecond >= minBps)
         .fold<AudioStreamInfo?>(null, (best, s) {
-          if (best == null) return s;
-          return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond
-              ? s
-              : best;
-        });
+      if (best == null) return s;
+      return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond ? s : best;
+    });
     audioStream ??= alt
         .where((s) => s.bitrate.bitsPerSecond >= minBps)
         .fold<AudioStreamInfo?>(null, (best, s) {
-          if (best == null) return s;
-          return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond
-              ? s
-              : best;
-        });
+      if (best == null) return s;
+      return s.bitrate.bitsPerSecond > best.bitrate.bitsPerSecond ? s : best;
+    });
     audioStream ??= manifest.audioOnly.withHighestBitrate();
 
     return {
@@ -209,6 +205,9 @@ Future<Map<String, dynamic>?> _resolveViaOkatsu(
   HttpClient httpClient,
   String videoId,
 ) async {
+  if (videoId.startsWith('local_') || videoId.startsWith('local:')) {
+    return null;
+  }
   final url = Uri.parse(
     'https://okatsu-rolezapiiz.vercel.app/downloader/ytmp3?url=https://www.youtube.com/watch?v=$videoId',
   );
@@ -346,12 +345,10 @@ Future<void> _handleBuildAndResolveProgressive(
         final priorityResolved = resolved.any(
           (m) => m['index'] == priorityIndex,
         );
-        final newlyResolvedCritical = resolved
-            .where((m) => critical.contains(m['index']))
-            .length;
-        final int dynamicBatchSize = (resolved.length < 8)
-            ? 3
-            : configuredBatchSize;
+        final newlyResolvedCritical =
+            resolved.where((m) => critical.contains(m['index'])).length;
+        final int dynamicBatchSize =
+            (resolved.length < 8) ? 3 : configuredBatchSize;
         // Emit conditions:
         // 1. Immediate when a critical track resolves and wasn't yet emitted individually.
         // 2. When accumulated sinceLastEmit reaches dynamic batch size.

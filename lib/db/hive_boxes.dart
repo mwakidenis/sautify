@@ -13,12 +13,21 @@ class HiveBoxes {
   static const String albums = 'albums_box';
   static const String stats = 'stats_box';
 
+  static Future<void>? _initFuture;
+
   static Future<void> init() async {
-    try {
-      await Hive.initFlutter();
-    } catch (_) {
-      // Hive might already be initialized; ignore
-    }
-    // Boxes will be lazily opened where needed
+    final existing = _initFuture;
+    if (existing != null) return existing;
+
+    final fut = () async {
+      try {
+        await Hive.initFlutter();
+      } catch (_) {
+        // Hive might already be initialized; ignore
+      }
+    }();
+
+    _initFuture = fut;
+    return fut;
   }
 }

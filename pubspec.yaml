@@ -1,9 +1,9 @@
 name: sautifyv2
-description: "A music streaming app, alternative  to spotify & youtube music. "
+description: "A music streaming app, alternative  to spotify & youtube music with also local music  player ondevice  songs."
 
 publish_to: "none"
 
-version: 0.0.46
+version: 0.0.48
 # environment specifies the Dart SDK version constraints for this project. between 3.0.0 and 4.0.0
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -17,7 +17,8 @@ dependencies:
   cupertino_icons: any
   just_audio_background: any
   just_audio: any
-  provider: any
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.5
   shared_preferences: any
   http: any
   dio: any
@@ -67,6 +68,7 @@ dependencies:
   audiotags: ^1.4.5
   squiggly_slider: ^1.0.5
   flutter_oknob: ^0.0.5
+  cached_network_image: any
 
   intl: any
 dependency_overrides:

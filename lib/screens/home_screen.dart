@@ -7,313 +7,197 @@ https://creativecommons.org/licenses/by/4.0/
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:expressive_refresh/expressive_refresh.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_m3shapes/flutter_m3shapes.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-// New imports for download/offline
 import 'package:http/http.dart' as http;
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 import 'package:sautifyv2/apis/music_api.dart';
+import 'package:sautifyv2/blocs/download/download_cubit.dart';
+import 'package:sautifyv2/blocs/download/download_state.dart';
+import 'package:sautifyv2/blocs/home/home_cubit.dart';
+import 'package:sautifyv2/blocs/home/home_state.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/models/home/contents.dart';
 import 'package:sautifyv2/models/home/home.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
-import 'package:sautifyv2/providers/fetch_home_Section.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
 import 'package:sautifyv2/screens/playlist_overlay_screen.dart';
 import 'package:sautifyv2/screens/search_overlay_screen.dart';
-import 'package:sautifyv2/services/homeservice.dart';
-import 'package:sautifyv2/services/image_cache_service.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  final ValueNotifier<Set<String>> _downloading = ValueNotifier<Set<String>>(
-    {},
-  );
-
-  Box<String>? _downloadsBox;
-  // Simple tap throttle timestamp to prevent rapid double taps,surprisingly it works
-  DateTime _lastActionAt = DateTime.fromMillisecondsSinceEpoch(0);
-  HomeDataSource? _lastSnackSource;
-
-  @override
-  void initState() {
-    super.initState();
-    _initDownloadsBox();
-  }
-
-  Future<void> _initDownloadsBox() async {
-    try {
-      await Hive.initFlutter();
-    } catch (_) {}
-    _downloadsBox = Hive.isBoxOpen('downloads_box')
-        ? Hive.box<String>('downloads_box')
-        : await Hive.openBox<String>('downloads_box');
-    if (mounted) setState(() {});
-  }
-
-  void _setDownloading(String key, bool value) {
-    final s = Set<String>.from(_downloading.value);
-    if (value) {
-      s.add(key);
-    } else {
-      s.remove(key);
-    }
-    _downloading.value = s;
-  }
-
-  bool _throttle([int debounceMs = 600]) {
-    final now = DateTime.now();
-    if (now.difference(_lastActionAt).inMilliseconds < debounceMs) {
-      return false;
-    }
-    _lastActionAt = now;
-    return true;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => HomeNotifier(),
-      child: Scaffold(
-        // backgroundColor: bgcolor,
-        appBar: AppBar(
-          leading: Padding(
+    return Scaffold(
+      appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: () {
+                  context.read<HomeCubit>().fetchHomeSections();
+                },
+              ),
+            ),
+          ),
+        ),
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          'S A U T I F Y',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+            letterSpacing: 4,
+            color: Colors.white,
+          ),
+        ),
+        actions: [
+          Padding(
             padding: const EdgeInsets.all(8.0),
             child: Container(
               decoration: BoxDecoration(
-                // color: appbarcolor.withAlpha(155),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Center(
-                // Use a Builder to obtain a context that is below the
-                // ChangeNotifierProvider so Provider.of/read works.
-                child: Builder(
-                  builder: (ctx) => IconButton(
-                    icon: const Icon(Icons.refresh, color: Colors.white),
-                    onPressed: () {
-                      ctx.read<HomeNotifier>().fetchHomeSections();
-                    },
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.search_rounded,
+                    color: Colors.white,
+                    opticalSize: 24,
+                    weight: 800,
                   ),
-                ),
-              ),
-            ),
-          ),
-          elevation: 0,
-          centerTitle: true,
-          title: const Text(
-            'S A U T I F Y',
-            style: TextStyle(
-              // fontFamily: 'RobotoMono',
-              fontWeight: FontWeight.bold,
-              fontSize: 24,
-              letterSpacing: 4,
-              color: Colors.white,
-            ),
-          ),
-          // backgroundColor: bgcolor,
-          actions: [
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  //     color: appbarcolor.withAlpha(155),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Center(
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.search_rounded,
-                      color: Colors.white,
-                      opticalSize: 24,
-                      weight: 800,
-                    ),
-                    onPressed: () {
-                      /*   showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
                         builder: (context) => const SearchOverlayScreen(),
-                      );*/
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const SearchOverlayScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: Consumer<HomeNotifier>(
-          builder: (context, homeNotifier, child) {
-            if (homeNotifier.error != null) {
-              final isOfflineErr = homeNotifier.error!.toLowerCase().contains(
-                'offline',
-              );
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      isOfflineErr
-                          ? Icons.wifi_off_rounded
-                          : Icons.error_outline,
-                      color: isOfflineErr ? Colors.orange : Colors.red,
-                      size: 64,
-                    ),
-                    SizedBox(height: 16),
-                    if (isOfflineErr)
-                      Column(
-                        children: const [
-                          Text(
-                            "You're offline",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
-                            ),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Check your connection and try again.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      )
-                    else
-                      Text(
-                        'Error: ${homeNotifier.error}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.red),
                       ),
-                    SizedBox(height: 16),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                      ),
-                      onPressed: () => homeNotifier.fetchHomeSections(),
-                      child: Text('Retry'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            // Show an ephemeral SnackBar instead of a persistent banner when
-            // content is served from cache or empty fallback.
-            _maybeShowInfoSnack(context, homeNotifier);
-
-            final colorScheme = Theme.of(context).colorScheme;
-
-            return ExpressiveRefreshIndicator(
-              indicatorConstraints: BoxConstraints(
-                maxHeight: 80,
-                maxWidth: MediaQuery.of(context).size.width * 0.3,
-                minHeight: 60,
-                minWidth: MediaQuery.of(context).size.width * 0.15,
-              ),
-              //     backgroundColor: appbarcolor.withAlpha(200),
-              elevation: 1,
-              color: colorScheme.primary.withAlpha(200),
-              backgroundColor: colorScheme.surfaceContainerHighest.withAlpha(
-                100,
-              ),
-              onRefresh: () => homeNotifier.refresh(),
-              child: Skeletonizer(
-                enabled:
-                    homeNotifier.isLoading ||
-                    !homeNotifier.isInitialized ||
-                    homeNotifier.sections.isEmpty,
-                effect: ShimmerEffect(
-                  baseColor: colorScheme.surfaceContainerHighest,
-                  highlightColor: colorScheme.surfaceContainerHighest.withAlpha(
-                    153,
-                  ), // 60% opacity
-                  duration: const Duration(milliseconds: 800),
-                ),
-                child: ListView.builder(
-                  //controller: _scrollController,
-                  padding: const EdgeInsets.only(
-                    bottom: 100,
-                  ), // Space for global mini player
-                  itemCount: homeNotifier.sections.isEmpty
-                      ? 5
-                      : homeNotifier.sections
-                            .where((section) => section.contents.isNotEmpty)
-                            .length,
-                  itemBuilder: (context, index) {
-                    if (homeNotifier.sections.isEmpty) {
-                      return _buildSkeletonSection();
-                    }
-
-                    final sectionsWithContent = homeNotifier.sections
-                        .where((section) => section.contents.isNotEmpty)
-                        .toList();
-
-                    if (index >= sectionsWithContent.length) {
-                      return const SizedBox.shrink();
-                    }
-
-                    final section = sectionsWithContent[index];
-                    return _buildSectionWidget(context, section);
+                    );
                   },
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+      body: BlocBuilder<HomeCubit, HomeState>(
+        builder: (context, state) {
+          if (state.error != null) {
+            final isOfflineErr = state.error!.toLowerCase().contains('offline');
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    isOfflineErr ? Icons.wifi_off_rounded : Icons.error_outline,
+                    color: isOfflineErr ? Colors.orange : Colors.red,
+                    size: 64,
+                  ),
+                  const SizedBox(height: 16),
+                  if (isOfflineErr)
+                    const Column(
+                      children: [
+                        Text(
+                          "You're offline",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 18,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Check your connection and try again.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ],
+                    )
+                  else
+                    Text(
+                      'Error: ${state.error}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                    ),
+                    onPressed: () =>
+                        context.read<HomeCubit>().fetchHomeSections(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
             );
-          },
-        ),
+          }
+
+          final colorScheme = Theme.of(context).colorScheme;
+
+          return ExpressiveRefreshIndicator(
+            indicatorConstraints: BoxConstraints(
+              maxHeight: 80,
+              maxWidth: MediaQuery.of(context).size.width * 0.3,
+              minHeight: 60,
+              minWidth: MediaQuery.of(context).size.width * 0.15,
+            ),
+            elevation: 1,
+            color: colorScheme.primary.withAlpha(200),
+            backgroundColor: colorScheme.surfaceContainerHighest.withAlpha(100),
+            onRefresh: () => context.read<HomeCubit>().refresh(),
+            child: Skeletonizer(
+              enabled: state.isLoading ||
+                  !state.isInitialized ||
+                  (state.homeData?.sections.isEmpty ?? true),
+              effect: ShimmerEffect(
+                baseColor: colorScheme.surfaceContainerHighest,
+                highlightColor:
+                    colorScheme.surfaceContainerHighest.withAlpha(153),
+                duration: const Duration(milliseconds: 800),
+              ),
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 100),
+                itemCount: state.homeData?.sections.isEmpty ?? true
+                    ? 5
+                    : state.homeData!.sections
+                        .where((section) => section.contents.isNotEmpty)
+                        .length,
+                itemBuilder: (context, index) {
+                  if (state.homeData?.sections.isEmpty ?? true) {
+                    return _buildSkeletonSection();
+                  }
+
+                  final sectionsWithContent = state.homeData!.sections
+                      .where((section) => section.contents.isNotEmpty)
+                      .toList();
+
+                  if (index >= sectionsWithContent.length) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final section = sectionsWithContent[index];
+                  return _buildSectionWidget(context, section);
+                },
+              ),
+            ),
+          );
+        },
       ),
     );
-  }
-
-  void _maybeShowInfoSnack(BuildContext context, HomeNotifier homeNotifier) {
-    // Avoid showing during initial loading with empty list
-    if (homeNotifier.isLoading && homeNotifier.sections.isEmpty) return;
-    final src = homeNotifier.servedFrom;
-    if (src == HomeDataSource.fresh) return;
-    if (_lastSnackSource == src) return; // don't spam
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final isFallback = src == HomeDataSource.emptyFallback;
-      final text = isFallback
-          ? "Couldn't reach YT Music. Showing placeholders."
-          : "Showing cached sections. Pull to refresh for latest.";
-      final snack = SnackBar(
-        content: Text(text),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: isFallback
-            ? Colors.orange.withAlpha((255 * 0.9).toInt())
-            : Theme.of(
-                context,
-              ).colorScheme.primary.withAlpha((255 * 0.9).toInt()),
-        action: SnackBarAction(
-          label: 'Retry',
-          onPressed: () =>
-              homeNotifier.refresh(timeout: const Duration(seconds: 20)),
-        ),
-        duration: const Duration(seconds: 3),
-      );
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(snack);
-    });
-    _lastSnackSource = src;
   }
 
   Widget _buildSectionWidget(BuildContext context, Section section) {
@@ -422,8 +306,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     MaterialPageRoute(
                                       builder: (context) =>
                                           PlaylistOverlayScreen(
-                                            playlistContent: content,
-                                          ),
+                                        playlistContent: content,
+                                      ),
                                     ),
                                   );
                                 },
@@ -442,9 +326,8 @@ class _HomeScreenState extends State<HomeScreen> {
               height: 220,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: section.contents.length > 25
-                    ? 25
-                    : section.contents.length,
+                itemCount:
+                    section.contents.length > 25 ? 25 : section.contents.length,
                 itemBuilder: (context, index) {
                   final content = section.contents[index];
                   return _buildContentCard(context, content);
@@ -463,19 +346,15 @@ class _HomeScreenState extends State<HomeScreen> {
     VoidCallback? onTap,
   }) {
     final key = content.videoId ?? content.playlistId ?? content.name;
-    return ValueListenableBuilder<Set<String>>(
-      valueListenable: _downloading,
-      builder: (context, downloadingSet, _) {
-        final isBusy = downloadingSet.contains(key);
-        // offline badge for single tracks only
+    return BlocBuilder<DownloadCubit, DownloadState>(
+      builder: (context, state) {
+        final isBusy = state.downloadingIds.contains(key);
         final isDownloaded =
-            content.videoId != null &&
-            content.videoId!.isNotEmpty &&
-            (_downloadsBox?.containsKey(content.videoId) ?? false);
+            context.read<DownloadCubit>().isDownloaded(content.videoId ?? '');
+
         return Container(
           width: 200,
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(24)),
-          // margin: const EdgeInsets.only(right: 12),
           child: Material(
             color: Theme.of(context).colorScheme.primary.withAlpha(30),
             shape: RoundedRectangleBorder(
@@ -490,7 +369,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: isBusy
                   ? null
                   : () {
-                      if (!_throttle()) return;
                       if (onTap != null) {
                         onTap();
                       } else {
@@ -500,7 +378,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  // Artwork + download button + offline badge
                   SizedBox(
                     height: 130,
                     child: Stack(
@@ -514,22 +391,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ? M3Container.c9SidedCookie(
                                     child: CachedNetworkImage(
                                       imageUrl: content.thumbnailUrl,
-                                      placeholder: M3Container.c7SidedCookie(
-                                        color: Theme.of(
-                                          context,
-                                        ).scaffoldBackgroundColor.withAlpha(50),
-                                        child: LoadingIndicatorM3E(
-                                          containerColor: Theme.of(
-                                            context,
-                                          ).colorScheme.primary.withAlpha(100),
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.primary.withAlpha(155),
-                                          constraints: BoxConstraints(
-                                            maxHeight: 100,
-                                            maxWidth: 100,
-                                            minHeight: 50,
-                                            minWidth: 50,
+                                      placeholder: (context, url) =>
+                                          M3Container.c7SidedCookie(
+                                        color: Theme.of(context)
+                                            .scaffoldBackgroundColor
+                                            .withAlpha(50),
+                                        child: Center(
+                                          child: LoadingIndicatorM3E(
+                                            containerColor: Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withAlpha(100),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary
+                                                .withAlpha(155),
+                                            constraints:
+                                                const BoxConstraints.tightFor(
+                                              width: 56,
+                                              height: 56,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -558,9 +439,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.green.withAlpha(
-                                  (255 * 0.85).toInt(),
-                                ),
+                                color: Colors.green
+                                    .withAlpha((255 * 0.85).toInt()),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
@@ -591,10 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: InkWell(
                               onTap: isBusy
                                   ? null
-                                  : () {
-                                      if (!_throttle()) return;
-                                      _onDownloadPressed(context, content);
-                                    },
+                                  : () => _onDownloadPressed(context, content),
                               child: Container(
                                 decoration: BoxDecoration(
                                   color: Colors.black54,
@@ -609,8 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           strokeWidth: 2,
                                           valueColor:
                                               AlwaysStoppedAnimation<Color>(
-                                                Colors.white,
-                                              ),
+                                                  Colors.white),
                                         ),
                                       )
                                     : const Icon(
@@ -624,8 +500,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-
-                  // Texts
                   Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: Column(
@@ -735,7 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(4),
                     ),
-                    color: cardcolor.withAlpha(179), // 70% opacity
+                    color: cardcolor.withAlpha(179),
                   ),
                 ),
               ),
@@ -751,7 +625,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 12,
                       width: 120,
                       decoration: BoxDecoration(
-                        color: cardcolor.withAlpha(179), // 70% opacity
+                        color: cardcolor.withAlpha(179),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -760,7 +634,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 10,
                       width: 80,
                       decoration: BoxDecoration(
-                        color: cardcolor.withAlpha(128), // 50% opacity
+                        color: cardcolor.withAlpha(128),
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -769,7 +643,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       height: 16,
                       width: 50,
                       decoration: BoxDecoration(
-                        color: cardcolor.withAlpha(179), // 70% opacity
+                        color: cardcolor.withAlpha(179),
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
@@ -784,10 +658,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleContentTap(BuildContext context, Contents content) {
-    // If a downloaded/local version exists, prefer it
     final videoId = content.videoId;
     if (videoId != null && videoId.isNotEmpty) {
-      final jsonStr = _downloadsBox?.get(videoId);
+      final downloadsBox = Hive.box<String>('downloads_box');
+      final jsonStr = downloadsBox.get(videoId);
       if (jsonStr != null) {
         try {
           final data = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -799,7 +673,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: data['title'] as String? ?? content.name,
                   artist: data['artist'] as String? ?? content.artistName,
                   imageUrl: data['artPath'] as String? ?? content.thumbnailUrl,
-                  // For local, pass single-item playlist via service entry point
                   playlist: [
                     StreamingData(
                       videoId: videoId,
@@ -825,7 +698,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // If we have a song videoId, go straight to player
     if ((content.type.toLowerCase().contains('song') ||
             content.type.toLowerCase().contains('track')) &&
         content.videoId != null &&
@@ -845,7 +717,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Check if it's a playlist type content
     if (content.type.toLowerCase().contains('playlist') ||
         content.playlistId != null) {
       if (content.playlistId != null && content.playlistId!.isNotEmpty) {
@@ -857,14 +728,13 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text('No playlist ID available'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } else {
-      // Handle other content types (albums, etc.)
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => PlayerScreen(
@@ -889,49 +759,34 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final key = videoId;
-    _setDownloading(key, true);
+    final downloadCubit = context.read<DownloadCubit>();
+    downloadCubit.setDownloading(videoId, true);
 
     try {
-      // Ask storage permission on Android
-      if (Platform.isAndroid) {
-        final status = await Permission.storage.request();
-        if (!status.isGranted) {
-          throw Exception('Storage permission denied');
-        }
-      }
-
-      // Resolve destination folder
       final Directory baseDir = Platform.isAndroid
           ? (await getExternalStorageDirectory()) ??
-                await getApplicationDocumentsDirectory()
+              await getApplicationDocumentsDirectory()
           : await getApplicationDocumentsDirectory();
       final Directory musicDir = Directory('${baseDir.path}/Sautify/Downloads');
       if (!await musicDir.exists()) {
         await musicDir.create(recursive: true);
       }
 
-      // File name base
       final safeTitle = _sanitizeFileName(content.name);
-
-      // Fetch stream URL via API service
       final api = Api();
       final url = await api.getDownloadUrl(videoId);
-      final meta = api.getMetadata; // artist, title, thumbnail, duration
+      final meta = api.getMetadata;
 
-      // Decide file extension from URL/mime (Explode often returns webm/opus)
       final ext = _inferAudioExtensionFromUrl(url);
       final filePath = '${musicDir.path}/$safeTitle$ext';
       final file = File(filePath);
 
-      // Download bytes with HTTP
       final resp = await http.get(Uri.parse(url));
       if (resp.statusCode != 200) {
         throw Exception('Failed to download audio');
       }
       await file.writeAsBytes(resp.bodyBytes);
 
-      // Save artwork alongside and basic metadata json
       String? artPath;
       if (meta.thumbnail.isNotEmpty) {
         try {
@@ -944,7 +799,6 @@ class _HomeScreenState extends State<HomeScreen> {
         } catch (_) {}
       }
 
-      // Save a small sidecar JSON with metadata for offline browsing
       final metaJson = {
         'videoId': videoId,
         'title': meta.title.isNotEmpty ? meta.title : content.name,
@@ -955,25 +809,19 @@ class _HomeScreenState extends State<HomeScreen> {
         'downloadedAt': DateTime.now().toIso8601String(),
       };
 
-      await _downloadsBox?.put(videoId, jsonEncode(metaJson));
+      final downloadsBox = Hive.box<String>('downloads_box');
+      await downloadsBox.put(videoId, jsonEncode(metaJson));
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Downloaded \'${content.name}\'')));
-      // Trigger rebuild to show offline badge
-      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloaded \'${content.name}\'')));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Download failed: $e')));
     } finally {
-      _setDownloading(key, false);
+      downloadCubit.setDownloading(videoId, false);
     }
   }
 
-  // Infer proper audio extension from URL or mime hints
   String _inferAudioExtensionFromUrl(String url) {
     final u = url.toLowerCase();
     if (u.contains('mime=audio%2fwebm') ||
@@ -986,15 +834,10 @@ class _HomeScreenState extends State<HomeScreen> {
         u.endsWith('.m4a')) {
       return '.m4a';
     }
-    if (u.endsWith('.mp3')) {
-      return '.mp3';
-    }
-    // Default to mp3 for legacy
     return '.mp3';
   }
 
   String _sanitizeFileName(String s) {
-    // just for  the crazy youtube namings by some artists lol.
     final illegal = RegExp(r'[\\/:*?"<>|]');
     return s.replaceAll(illegal, '_');
   }

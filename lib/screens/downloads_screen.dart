@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2025 Wambugu Kinyua
 Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
 https://creativecommons.org/licenses/by/4.0/
@@ -6,449 +6,329 @@ https://creativecommons.org/licenses/by/4.0/
 
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:on_audio_query/on_audio_query.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:sautifyv2/blocs/device_library/device_library_cubit.dart';
+import 'package:sautifyv2/blocs/device_library/device_library_state.dart';
+import 'package:sautifyv2/blocs/download/download_cubit.dart';
+import 'package:sautifyv2/blocs/download/download_state.dart';
+import 'package:sautifyv2/blocs/settings/settings_cubit.dart';
+import 'package:sautifyv2/blocs/settings/settings_state.dart';
 import 'package:sautifyv2/l10n/app_localizations.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/screens/player_screen.dart';
-import 'package:sautifyv2/services/audio_player_service.dart';
-import 'package:sautifyv2/services/settings_service.dart';
+import 'package:sautifyv2/widgets/local_artwork_image.dart';
 
-class DownloadsScreen extends StatefulWidget {
+class DownloadsScreen extends StatelessWidget {
   const DownloadsScreen({super.key});
 
-  @override
-  State<DownloadsScreen> createState() => _DownloadsScreenState();
-}
-
-class _DownloadsScreenState extends State<DownloadsScreen> {
-  final OnAudioQuery _audioQuery = OnAudioQuery();
-  bool _hasPermission = false;
-  bool _isLoading = true;
-  List<SongModel> _songs = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _checkPermissionAndLoad();
+  static bool _isHttpUrl(String url) {
+    final u = url.trim().toLowerCase();
+    return u.startsWith('http://') || u.startsWith('https://');
   }
 
-  Future<void> _checkPermissionAndLoad() async {
-    setState(() => _isLoading = true);
-    try {
-      // Check permissions based on Android version
-      bool permissionGranted = false;
-      if (Platform.isAndroid) {
-        // For Android 13+ (SDK 33+), use audio permission
-        // For older versions, use storage permission
-        // We can try requesting both or checking status
-        final audioStatus = await Permission.audio.status;
-        final storageStatus = await Permission.storage.status;
+  static bool _looksLikeFilePath(String urlOrPath) {
+    final s = urlOrPath.trim().toLowerCase();
+    if (s.startsWith('file://')) return true;
+    if (s.startsWith('content://')) return false;
+    // Heuristic: absolute-ish paths or Windows drive paths.
+    return s.startsWith('/') || RegExp(r'^[a-z]:\\').hasMatch(s);
+  }
 
-        if (audioStatus.isGranted || storageStatus.isGranted) {
-          permissionGranted = true;
-        } else {
-          // Request permissions
-          // Note: On Android 13, requesting storage might not work as expected if targeting SDK 33
-          Map<Permission, PermissionStatus> statuses = await [
-            Permission.audio,
-            Permission.storage,
-          ].request();
-
-          if (statuses[Permission.audio]?.isGranted == true ||
-              statuses[Permission.storage]?.isGranted == true) {
-            permissionGranted = true;
-          }
-        }
-      } else {
-        // For other platforms (iOS, etc.), assume granted or handle differently
-        permissionGranted = true;
-      }
-
-      setState(() => _hasPermission = permissionGranted);
-
-      if (permissionGranted) {
-        await _loadSongs();
-      }
-    } catch (e) {
-      debugPrint('Error checking permissions: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+  static String _stripFileScheme(String s) {
+    final trimmed = s.trim();
+    if (trimmed.toLowerCase().startsWith('file://')) {
+      return trimmed.substring('file://'.length);
     }
+    return trimmed;
   }
 
-  Future<void> _loadSongs() async {
-    try {
-      // Get all songs from device
-      // We query all and then filter because querying by path is limited/complex with MediaStore
-      final songs = await _audioQuery.querySongs(
-        sortType: SongSortType.DATE_ADDED,
-        orderType: OrderType.DESC_OR_GREATER,
-        uriType: UriType.EXTERNAL,
-        ignoreCase: true,
-      );
+  Widget _buildArtwork(BuildContext context, StreamingData track) {
+    const double size = 50;
+    final theme = Theme.of(context);
 
-      // Filter by download path
-      final settings = Provider.of<SettingsService>(context, listen: false);
-      final downloadPath = settings.downloadPath;
-
-      // Normalize path for comparison (remove trailing slash if any)
-      final normalizedDownloadPath = downloadPath.endsWith('/')
-          ? downloadPath.substring(0, downloadPath.length - 1)
-          : downloadPath;
-
-      final filteredSongs = songs.where((song) {
-        // Check if song data path starts with our download path
-        // song.data contains the absolute path
-        if (song.data.isEmpty) return false;
-
-        // Case insensitive check for path
-        return song.data.toLowerCase().contains(
-          normalizedDownloadPath.toLowerCase(),
-        );
-      }).toList();
-
-      if (mounted) {
-        setState(() {
-          _songs = filteredSongs;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading songs: $e');
-    }
-  }
-
-  Future<void> _pickFolder() async {
-    try {
-      debugPrint('Requesting folder picker...');
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-      debugPrint('Selected directory: $selectedDirectory');
-
-      if (selectedDirectory != null) {
-        if (mounted) {
-          final settings = Provider.of<SettingsService>(context, listen: false);
-          await settings.setDownloadPath(selectedDirectory);
-          await _loadSongs();
-        }
-      }
-    } catch (e, stack) {
-      debugPrint('Error picking folder: $e\n$stack');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error picking folder. Using manual entry.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-        _showManualPathDialog();
-      }
-    }
-  }
-
-  void _showManualPathDialog() {
-    final controller = TextEditingController(
-      text: Provider.of<SettingsService>(context, listen: false).downloadPath,
-    );
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).cardColor,
-        title: Text(
-          'Enter Folder Path',
-          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
-        ),
-        content: TextField(
-          controller: controller,
-          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
-          decoration: InputDecoration(
-            labelText: 'Path',
-            labelStyle: TextStyle(
-              color: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.color?.withOpacity(0.7),
-            ),
-            hintText: '/storage/emulated/0/Music',
-            hintStyle: TextStyle(
-              color: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.color?.withOpacity(0.3),
-            ),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: Theme.of(context).textTheme.bodyLarge?.color,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              final path = controller.text.trim();
-              if (path.isNotEmpty) {
-                Provider.of<SettingsService>(
-                  context,
-                  listen: false,
-                ).setDownloadPath(path);
-                _loadSongs();
-                Navigator.pop(context);
-              }
-            },
-            child: Text(
-              'Save',
-              style: TextStyle(color: Theme.of(context).colorScheme.primary),
-            ),
-          ),
-        ],
+    final placeholder = Container(
+      color: theme.colorScheme.primary.withAlpha(30),
+      child: Icon(
+        Icons.music_note,
+        color: theme.colorScheme.primary,
       ),
     );
+
+    Widget child;
+    if (track.isLocal && track.localId != null) {
+      child = LocalArtworkImage(
+        localId: track.localId!,
+        placeholder: placeholder,
+        fit: BoxFit.cover,
+      );
+    } else {
+      final thumb = track.thumbnailUrl;
+      if (thumb != null && thumb.trim().isNotEmpty) {
+        if (_looksLikeFilePath(thumb)) {
+          child = Image.file(
+            File(_stripFileScheme(thumb)),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => placeholder,
+          );
+        } else if (_isHttpUrl(thumb)) {
+          child = CachedNetworkImage(
+            imageUrl: thumb,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => placeholder,
+            errorWidget: (_, __, ___) => placeholder,
+          );
+        } else {
+          child = placeholder;
+        }
+      } else {
+        child = placeholder;
+      }
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: child,
+      ),
+    );
+  }
+
+  List<StreamingData> _combineOfflineTracks(
+    List<StreamingData> downloaded,
+    List<StreamingData> onDevice,
+  ) {
+    final seen = <String>{};
+    final out = <StreamingData>[];
+
+    void addAll(Iterable<StreamingData> items) {
+      for (final t in items) {
+        final key = (t.streamUrl ?? '').isNotEmpty ? t.streamUrl! : t.videoId;
+        if (key.isEmpty) continue;
+        if (seen.add(key)) out.add(t);
+      }
+    }
+
+    addAll(downloaded);
+    addAll(onDevice);
+    return out;
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    return BlocBuilder<DownloadCubit, DownloadState>(
+      builder: (context, downloadState) {
+        return BlocBuilder<DeviceLibraryCubit, DeviceLibraryState>(
+          builder: (context, deviceState) {
+            final combined = _combineOfflineTracks(
+              downloadState.downloadedTracks,
+              deviceState.tracks,
+            );
 
-    if (!_hasPermission) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              l10n.permissionDenied,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _checkPermissionAndLoad,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
-              ),
-              child: Text(l10n.grantPermission),
-            ),
-          ],
-        ),
-      );
-    }
+            final isLoading =
+                (downloadState.isLoading || deviceState.isLoading) &&
+                    combined.isEmpty;
 
-    if (_songs.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.music_off_rounded,
-              size: 64,
-              color: Theme.of(context).iconTheme.color?.withOpacity(0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              l10n.noSongsFound,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.color?.withOpacity(0.7),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Path: ${Provider.of<SettingsService>(context).downloadPath}',
-              style: Theme.of(context).textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _pickFolder,
-              icon: Icon(Icons.folder_open, size: 18),
-              label: Text('Select Folder'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+            final showDownloadsPermissionGate =
+                !downloadState.hasPermission && deviceState.tracks.isEmpty;
 
-    return Scaffold(
-      // backgroundColor: bgcolor,
-      appBar: AppBar(
-        // backgroundColor: bgcolor,
-        elevation: 0,
-        title: Text(
-          l10n.downloadsTitle,
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          Consumer<SettingsService>(
-            builder: (context, settings, child) {
-              return Row(
-                children: [
-                  const Text('Offline', style: TextStyle(fontSize: 12)),
-                  Switch(
-                    value: settings.offlineMode,
-                    onChanged: (v) => settings.setOfflineMode(v),
-                    activeThumbColor: Theme.of(context).colorScheme.primary,
+            if (isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            if (showDownloadsPermissionGate) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      l10n.permissionDenied,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => context
+                          .read<DownloadCubit>()
+                          .checkPermissionAndLoad(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text(l10n.grantPermission),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () => context
+                          .read<DeviceLibraryCubit>()
+                          .requestPermission(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Grant device audio permission'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Scaffold(
+              appBar: AppBar(
+                elevation: 0,
+                title: Text(
+                  l10n.downloadsTitle,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.folder_open),
+                    onPressed: () => _pickFolder(context),
+                    tooltip: 'Change Download Folder',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () {
+                      context.read<DownloadCubit>().loadSongs();
+                      context.read<DeviceLibraryCubit>().refresh();
+                    },
+                    tooltip: 'Refresh',
                   ),
                 ],
-              );
-            },
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.folder_open,
-              color: Theme.of(context).iconTheme.color,
-            ),
-            onPressed: _pickFolder,
-            tooltip: 'Change Folder',
-          ),
-          IconButton(
-            icon: Icon(Icons.refresh, color: Theme.of(context).iconTheme.color),
-            onPressed: _loadSongs,
-          ),
-        ],
-      ),
-      body: ListView.builder(
-        padding: const EdgeInsets.only(bottom: 100), // Space for mini player
-        itemCount: _songs.length,
-        itemBuilder: (context, index) {
-          final song = _songs[index];
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary.withAlpha(30),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.primary.withAlpha(50),
-                width: 1,
               ),
-            ),
-            child: ListTile(
-              leading: QueryArtworkWidget(
-                id: song.id,
-                type: ArtworkType.AUDIO,
-                nullArtworkWidget: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.music_note,
-                    color: Theme.of(context).iconTheme.color,
-                  ),
-                ),
-                artworkBorder: BorderRadius.circular(8),
-                artworkWidth: 50,
-                artworkHeight: 50,
-              ),
-              title: Text(
-                song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
-              ),
-              subtitle: Text(
-                song.artist ?? '<Unknown>',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.color?.withOpacity(0.7),
-                ),
-              ),
-              onTap: () => _playSong(index),
-            ),
-          );
-        },
-      ),
+              body: combined.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.music_off_rounded,
+                            size: 64,
+                            color: Theme.of(context)
+                                .iconTheme
+                                .color
+                                ?.withOpacity(0.5),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            l10n.noSongsFound,
+                            style:
+                                Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      color: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge
+                                          ?.color
+                                          ?.withOpacity(0.7),
+                                    ),
+                          ),
+                          const SizedBox(height: 8),
+                          BlocBuilder<SettingsCubit, SettingsState>(
+                            builder: (context, settings) {
+                              return Text(
+                                'Path: ${settings.downloadPath}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                                textAlign: TextAlign.center,
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: () => _pickFolder(context),
+                            icon: const Icon(Icons.folder_open, size: 18),
+                            label: const Text('Select Folder'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  Theme.of(context).colorScheme.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: combined.length,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemBuilder: (context, index) {
+                        final track = combined[index];
+                        final canPlay =
+                            track.isAvailable && track.streamUrl != null;
+
+                        return ListTile(
+                          leading: _buildArtwork(context, track),
+                          title: Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          enabled: canPlay,
+                          onTap: canPlay
+                              ? () {
+                                  final playlist = combined
+                                      .where((t) =>
+                                          t.isAvailable && t.streamUrl != null)
+                                      .map(
+                                        (t) => t.copyWith(
+                                          isAvailable: true,
+                                          isLocal: true,
+                                        ),
+                                      )
+                                      .toList(growable: false);
+
+                                  final initialIndex = playlist.indexWhere(
+                                    (t) => t.videoId == track.videoId,
+                                  );
+
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => PlayerScreen(
+                                        title: track.title,
+                                        artist: track.artist,
+                                        imageUrl: track.thumbnailUrl,
+                                        playlist: playlist,
+                                        initialIndex:
+                                            initialIndex < 0 ? 0 : initialIndex,
+                                        sourceType: 'OFFLINE',
+                                        sourceName: 'Offline',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : null,
+                        );
+                      },
+                    ),
+            );
+          },
+        );
+      },
     );
   }
 
-  Future<void> _playSong(int index) async {
-    final audioService = Provider.of<AudioPlayerService>(
-      context,
-      listen: false,
-    );
-
-    // Convert SongModel list to StreamingData list
-    final playlist = _songs.map((song) {
-      // For local files, we use the file path as the ID or URL
-      // AudioPlayerService needs to handle local files correctly
-      // Assuming StreamingData can handle file paths in videoId or we need a way to distinguish
-
-      // We'll use the file URI as the videoId/streamUrl for local playback
-      // The AudioPlayerService needs to detect if it's a local file
-
-      return StreamingData(
-        videoId: song.data, // Use path as ID
-        title: song.title,
-        artist: song.artist ?? 'Unknown',
-        thumbnailUrl:
-            null, // We can't easily pass local artwork path here without extraction
-        duration: Duration(milliseconds: song.duration ?? 0),
-        streamUrl: song.data, // Local path
-        isLocal: true,
-        isAvailable: true,
-        localId: song.id,
-      );
-    }).toList();
-
-    await audioService.loadPlaylist(
-      playlist,
-      initialIndex: index,
-      autoPlay: true,
-      sourceType: 'DOWNLOADS',
-      sourceName: 'Offline Music',
-    );
-
-    if (mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => PlayerScreen(
-            title: playlist[index].title,
-            artist: playlist[index].artist,
-            imageUrl:
-                null, // Local artwork handling might be needed in PlayerScreen
-            duration: playlist[index].duration,
-            videoId: playlist[index].videoId,
-            playlist: playlist,
-            initialIndex: index,
-            sourceType: 'DOWNLOADS',
-            sourceName: 'Offline Music',
-          ),
-        ),
-      );
+  Future<void> _pickFolder(BuildContext context) async {
+    try {
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      if (selectedDirectory != null && context.mounted) {
+        context.read<SettingsCubit>().setDownloadPath(selectedDirectory);
+        context.read<DownloadCubit>().loadSongs();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error picking folder')),
+        );
+      }
     }
   }
 }
