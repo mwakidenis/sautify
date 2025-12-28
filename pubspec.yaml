@@ -65,7 +65,7 @@ dependencies:
   google_fonts: ^6.3.3
   home_widget: ^0.8.1
   audiotags: ^1.4.5
-
+  squiggly_slider: ^1.0.5
   flutter_oknob: ^0.0.5
 
   intl: any
