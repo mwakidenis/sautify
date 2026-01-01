@@ -7,7 +7,6 @@ https://creativecommons.org/licenses/by/4.0/
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
-import 'dart:io' show Platform;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
@@ -493,16 +492,17 @@ class MusicStreamingService {
 
       // Platform-aware container preference: iOS/macOS prefer mp4 (m4a),
       // Android/Windows/Linux prefer webm (opus). Fallback to any.
-      final preferMp4 = Platform.isIOS || Platform.isMacOS;
+      // CHANGED: Prefer MP4 (m4a) everywhere to ensure downloaded files are taggable
+      // by the audiotags package (which doesn't support WebM).
       final audioOnly = manifest.audioOnly.toList();
 
+      // STRICTLY prefer MP4. If no MP4 is found, we might fail to tag,
+      // but we prioritize finding an MP4 stream.
       Iterable<AudioStreamInfo> preferred = audioOnly.where(
-        (s) =>
-            preferMp4 ? s.container.name == 'mp4' : s.container.name == 'webm',
+        (s) => s.container.name == 'mp4' || s.container.name == 'm4a',
       );
       Iterable<AudioStreamInfo> alt = audioOnly.where(
-        (s) =>
-            preferMp4 ? s.container.name != 'mp4' : s.container.name != 'webm',
+        (s) => s.container.name != 'mp4',
       );
 
       int minBps;
