@@ -110,7 +110,7 @@ class SearchOverlayScreen extends StatelessWidget {
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
             icon: Icon(
-              Icons.keyboard_arrow_down,
+              Icons.keyboard_arrow_down_rounded,
               color: Theme.of(context).iconTheme.color,
               size: 32,
             ),
@@ -207,17 +207,46 @@ class SearchOverlayScreen extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final album = state.albumResults[index];
                     return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () async {
-                        if (audioService.isPreparing.value) return;
-
                         try {
-                          final tracksFull = await context
-                              .read<SearchBloc>()
-                              .fetchAlbumTracks(album.albumId);
+                          // Option A: Always interrupt whatever is loading/playing.
+                          try {
+                            await audioService.pause();
+                          } catch (_) {}
+                          try {
+                            await audioService.stop();
+                          } catch (_) {}
+
+                          if (album.albumId.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Couldn\'t open this album.'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          final tracksFull =
+                              await context.read<SearchBloc>().fetchAlbumTracks(
+                                    album.albumId,
+                                    playlistId: album.playlistId,
+                                  );
+                          if (!context.mounted) return;
                           final tracks = tracksFull.length > 25
                               ? tracksFull.sublist(0, 25)
                               : tracksFull;
-                          if (tracks.isEmpty) return;
+                          if (tracks.isEmpty) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    'Couldn\'t load album songs. Try again.'),
+                              ),
+                            );
+                            return;
+                          }
 
                           await audioService.replacePlaylist(
                             tracks,
@@ -228,19 +257,28 @@ class SearchOverlayScreen extends StatelessWidget {
                             sourceName: album.title,
                           );
 
-                          if (context.mounted) {
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(
-                                builder: (context) => PlayerScreen(
-                                  title: tracks.first.title,
-                                  artist: tracks.first.artist,
-                                  imageUrl: tracks.first.thumbnailUrl,
-                                  duration: tracks.first.duration,
-                                ),
+                          if (!context.mounted) return;
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                              builder: (context) => PlayerScreen(
+                                title: tracks.first.title,
+                                artist: tracks.first.artist,
+                                imageUrl: tracks.first.thumbnailUrl,
+                                duration: tracks.first.duration,
                               ),
-                            );
-                          }
-                        } catch (_) {}
+                            ),
+                          );
+                        } catch (e) {
+                          debugPrint('Album open failed: $e');
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text('Couldn\'t open this album. Try again.'),
+                            ),
+                          );
+                        }
                       },
                       onLongPress: () async {
                         final libCubit = context.read<LibraryCubit>();
@@ -255,13 +293,26 @@ class SearchOverlayScreen extends StatelessWidget {
                             );
                           }
                         } else {
-                          final tracksFull = await context
-                              .read<SearchBloc>()
-                              .fetchAlbumTracks(album.albumId);
+                          final tracksFull =
+                              await context.read<SearchBloc>().fetchAlbumTracks(
+                                    album.albumId,
+                                    playlistId: album.playlistId,
+                                  );
                           final tracks = tracksFull.length > 25
                               ? tracksFull.sublist(0, 25)
                               : tracksFull;
-                          if (tracks.isEmpty) return;
+                          if (tracks.isEmpty) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Couldn\'t load album songs to save. Try again.'),
+                                ),
+                              );
+                            }
+                            return;
+                          }
                           final saved = SavedAlbum(
                             id: album.albumId,
                             title: album.title,
@@ -359,8 +410,26 @@ class SearchOverlayScreen extends StatelessWidget {
                                                     final tracks = await context
                                                         .read<SearchBloc>()
                                                         .fetchAlbumTracks(
-                                                            album.albumId);
-                                                    if (tracks.isEmpty) return;
+                                                          album.albumId,
+                                                          playlistId:
+                                                              album.playlistId,
+                                                        );
+                                                    if (tracks.isEmpty) {
+                                                      if (context.mounted) {
+                                                        ScaffoldMessenger.of(
+                                                                context)
+                                                            .clearSnackBars();
+                                                        ScaffoldMessenger.of(
+                                                                context)
+                                                            .showSnackBar(
+                                                          const SnackBar(
+                                                            content: Text(
+                                                                'Couldn\'t load album songs to save. Try again.'),
+                                                          ),
+                                                        );
+                                                      }
+                                                      return;
+                                                    }
                                                     final saved = SavedAlbum(
                                                       id: album.albumId,
                                                       title: album.title,
