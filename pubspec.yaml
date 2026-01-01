@@ -71,10 +71,10 @@ dependencies:
   cached_network_image: any
 
   intl: any
+  image: ^4.7.2
 dependency_overrides:
   intl: 0.20.2
   freezed_annotation: ^3.0.0
-  flutter_rust_bridge: ^2.11.1
 
 dev_dependencies:
   flutter_test:
