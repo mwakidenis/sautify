@@ -13,7 +13,9 @@ import 'package:dio/dio.dart' show Options;
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:sautifyv2/db/continue_listening_store.dart';
 import 'package:sautifyv2/db/library_store.dart';
+import 'package:sautifyv2/db/metadata_overrides_store.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/loading_progress_model.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
@@ -240,6 +242,173 @@ class AudioPlayerService extends ChangeNotifier {
   bool _isShuffleEnabled = false;
   LoopMode _loopMode = LoopMode.off;
   String? _lastRecentVideoId;
+
+  // Continue listening persistence
+  DateTime _lastContinueSaveAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _lastContinuePositionMs = 0;
+  static const Duration _continueSaveThrottle = Duration(seconds: 3);
+
+  // Seeded resume state (loaded from Hive at startup)
+  bool _seededFromContinueListening = false;
+  Duration? _pendingResumePosition;
+
+  static bool _isHttpUrl(String s) {
+    final v = s.trim().toLowerCase();
+    return v.startsWith('http://') || v.startsWith('https://');
+  }
+
+  static bool _isHttpUri(Uri uri) {
+    final s = uri.scheme.toLowerCase();
+    return s == 'http' || s == 'https';
+  }
+
+  static bool _isContentUri(String s) {
+    return s.trim().toLowerCase().startsWith('content://');
+  }
+
+  static bool _looksLikeFilePath(String urlOrPath) {
+    final v = urlOrPath.trim();
+    if (v.isEmpty) return false;
+    final lower = v.toLowerCase();
+    if (lower.startsWith('file://')) return true;
+    if (lower.startsWith('content://')) return false;
+    if (v.startsWith('/')) return true;
+    if (RegExp(r'^[a-zA-Z]:\\').hasMatch(v)) return true;
+    return v.contains('\\');
+  }
+
+  Map<String, String>? _headersForPlayableUri(Uri uri) {
+    // just_audio injects headers via an internal HTTP proxy.
+    // That proxy does not support content:// or file:// URIs.
+    return _isHttpUri(uri) ? _headers : null;
+  }
+
+  bool _shouldUseCacheForPlayableUri(Uri uri) {
+    // Only remote streams benefit from proxy/cache.
+    return _isHttpUri(uri);
+  }
+
+  static int? _tryParseLocalIdFromVideoId(String videoId) {
+    if (videoId.startsWith('local_')) {
+      return int.tryParse(videoId.substring('local_'.length));
+    }
+    if (videoId.startsWith('local:')) {
+      return int.tryParse(videoId.substring('local:'.length));
+    }
+    return null;
+  }
+
+  static String _androidContentUriForLocalId(int id) {
+    return 'content://media/external/audio/media/$id';
+  }
+
+  static String _stripFileScheme(String s) {
+    final v = s.trim();
+    if (v.toLowerCase().startsWith('file://')) {
+      return v.substring('file://'.length);
+    }
+    return v;
+  }
+
+  StreamingData _normalizeRestoredTrack(StreamingData t) {
+    final raw = (t.streamUrl ?? '').trim();
+
+    // Treat device library IDs as local even if streamUrl is missing.
+    final looksLocalId = t.videoId.startsWith('local_');
+
+    // content:// URIs are playable locally even when file paths are inaccessible.
+    if (raw.isNotEmpty && _isContentUri(raw)) {
+      return t.copyWith(isLocal: true, isAvailable: true);
+    }
+
+    // If we have a MediaStore ID, prefer using its content:// URI on Android.
+    // This improves resume reliability under scoped storage where file paths may be unreadable.
+    if (Platform.isAndroid) {
+      final localId = t.localId ?? _tryParseLocalIdFromVideoId(t.videoId);
+      if (localId != null && raw.isEmpty) {
+        return t.copyWith(
+          isLocal: true,
+          isAvailable: true,
+          streamUrl: _androidContentUriForLocalId(localId),
+          localId: t.localId ?? localId,
+        );
+      }
+    }
+
+    // File paths / file:// URIs
+    if (raw.isNotEmpty && !_isHttpUrl(raw)) {
+      final path = _stripFileScheme(raw);
+      bool exists = true;
+      try {
+        exists = File(path).existsSync();
+      } catch (_) {
+        exists = true;
+      }
+
+      if (!exists && Platform.isAndroid) {
+        final localId = t.localId ?? _tryParseLocalIdFromVideoId(t.videoId);
+        if (localId != null) {
+          return t.copyWith(
+            isLocal: true,
+            isAvailable: true,
+            streamUrl: _androidContentUriForLocalId(localId),
+            localId: t.localId ?? localId,
+          );
+        }
+      }
+
+      return t.copyWith(isLocal: true, isAvailable: exists);
+    }
+
+    if (looksLocalId) {
+      return t.copyWith(isLocal: true);
+    }
+
+    // Otherwise, treat as online. Force refetch if the saved URL is stale.
+    return t.copyWith(
+      isLocal: false,
+      streamUrl: null,
+      isAvailable: false,
+      cachedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+
+  List<StreamingData> _normalizeRestoredPlaylist(List<StreamingData> tracks) {
+    return tracks.map(_normalizeRestoredTrack).toList(growable: false);
+  }
+
+  Future<void> _saveContinueListening({required Duration position}) async {
+    if (_playlist.isEmpty) return;
+    if (_currentIndex < 0 || _currentIndex >= _playlist.length) return;
+
+    // Throttle writes (and avoid writing the same position repeatedly)
+    final now = DateTime.now();
+    if (now.difference(_lastContinueSaveAt) < _continueSaveThrottle) return;
+    final posMs = position.inMilliseconds;
+    if ((posMs - _lastContinuePositionMs).abs() < 800) return;
+    _lastContinueSaveAt = now;
+    _lastContinuePositionMs = posMs;
+
+    // Keep the session lightweight
+    final capped =
+        _playlist.length > 200 ? _playlist.take(200).toList() : _playlist;
+
+    // Apply overrides before persisting so the resume UI matches the user's edits.
+    final applied = capped
+        .map((t) => MetadataOverridesStore.maybeApplySync(t))
+        .toList(growable: false);
+
+    await ContinueListeningStore.save(
+      ContinueListeningSession(
+        playlist: applied,
+        currentIndex: _currentIndex.clamp(0, applied.length - 1),
+        position: position,
+        sourceType: _sourceType,
+        sourceName: _sourceName,
+        updatedAt: now,
+      ),
+    );
+  }
 
   // New: source context
   String? _sourceName; // e.g., playlist/album name
@@ -657,7 +826,11 @@ class AudioPlayerService extends ChangeNotifier {
     });
 
     // Position/duration/state updates (progress bar & play/pause)
-    _player.positionStream.listen((_) => _emitTrackInfo());
+    _player.positionStream.listen((pos) {
+      _emitTrackInfo();
+      // Best-effort persistence for resume
+      _saveContinueListening(position: pos);
+    });
     _player.durationStream.listen((_) => _emitTrackInfo(force: true));
 
     // Handle playback completion and recents logging
@@ -671,12 +844,78 @@ class AudioPlayerService extends ChangeNotifier {
       if (state.playing && state.processingState == ProcessingState.ready) {
         final t = currentTrack;
         if (t != null && t.videoId != _lastRecentVideoId) {
-          LibraryStore.addRecent(t);
-          LibraryStore.incrementPlayCount(t);
+          final applied = MetadataOverridesStore.maybeApplySync(t);
+          LibraryStore.addRecent(applied);
+          LibraryStore.incrementPlayCount(applied);
           _lastRecentVideoId = t.videoId;
         }
       }
     });
+
+    // Seed last played song + playlist for UI continuity after app restart.
+    // We avoid eagerly rebuilding the audio source here to keep startup fast;
+    // the first user-initiated play will prepare and seek to the saved position.
+    _seedFromContinueListeningIfNeeded();
+  }
+
+  void _seedFromContinueListeningIfNeeded() {
+    if (_seededFromContinueListening) return;
+    if (_playlist.isNotEmpty) return;
+
+    final session = ContinueListeningStore.loadSync();
+    if (session == null) return;
+    if (session.playlist.isEmpty) return;
+
+    _seededFromContinueListening = true;
+    final normalized = _normalizeRestoredPlaylist(session.playlist);
+    _playlist = normalized
+        .map((t) => MetadataOverridesStore.maybeApplySync(t))
+        .toList(growable: false);
+    _currentIndex = session.currentIndex.clamp(0, _playlist.length - 1);
+    _sourceType = session.sourceType ?? 'CONTINUE';
+    _sourceName = session.sourceName ?? 'Continue listening';
+    _pendingResumePosition = session.position;
+
+    _playlistFingerprint = _computeFingerprint(_playlist);
+    _materializedIndices.clear();
+    _preloadedIndices.clear();
+    _childToPlaylistIndex = <int>[];
+    _lastAudioChildIndex = null;
+
+    _currentTrackController.add(currentTrack);
+    _emitTrackInfo(force: true);
+    notifyListeners();
+  }
+
+  Future<bool> restoreLastSession({bool autoPlay = true}) async {
+    await ContinueListeningStore.ensureReady();
+    final session = ContinueListeningStore.loadSync();
+    if (session == null) return false;
+    if (session.playlist.isEmpty) return false;
+
+    final playlist = _normalizeRestoredPlaylist(session.playlist)
+        .map((t) => MetadataOverridesStore.maybeApplySync(t))
+        .toList(growable: false);
+
+    await loadPlaylist(
+      playlist,
+      initialIndex: session.currentIndex,
+      autoPlay: false,
+      sourceType: session.sourceType ?? 'CONTINUE',
+      sourceName: session.sourceName ?? 'Continue listening',
+      withTransition: true,
+    );
+
+    try {
+      await seek(session.position, index: session.currentIndex);
+    } catch (_) {}
+
+    if (autoPlay) {
+      try {
+        await play();
+      } catch (_) {}
+    }
+    return true;
   }
 
   /// Re-apply dynamic settings that can change at runtime (speed, volume)
@@ -743,6 +982,10 @@ class AudioPlayerService extends ChangeNotifier {
     bool withTransition = false,
     bool force = false,
   }) async {
+    // Any explicit load replaces pending resume state.
+    _pendingResumePosition = null;
+    _seededFromContinueListening = false;
+
     // Enforce global max queue size of 25, keeping the selected track inside the window
     List<StreamingData> cappedTracks = newTracks;
     int cappedInitialIndex = initialIndex.clamp(0, newTracks.length - 1);
@@ -1209,10 +1452,14 @@ class AudioPlayerService extends ChangeNotifier {
     for (int i = 0; i < _playlist.length; i++) {
       final t = _playlist[i];
       if (!t.isReady || t.streamUrl == null) continue;
+
+      final raw = t.streamUrl!;
+      final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+      final headers = _headersForPlayableUri(uri);
       children.add(
         AudioSource.uri(
-          _toPlayableUri(t.streamUrl!, isLocal: t.isLocal),
-          headers: _headers,
+          uri,
+          headers: headers,
           tag: MediaItem(
             id: t.videoId,
             title: t.title,
@@ -1331,6 +1578,16 @@ class AudioPlayerService extends ChangeNotifier {
 
   /// Play current track
   Future<void> play() async {
+    final pending = _pendingResumePosition;
+    if (pending != null) {
+      // Clear first to avoid loops if seek triggers state updates.
+      _pendingResumePosition = null;
+      try {
+        await seek(pending, index: _currentIndex);
+      } catch (_) {
+        // Best-effort; still attempt to play.
+      }
+    }
     await _ensureCurrentTrackReady();
     await _player.play();
   }
@@ -1350,16 +1607,23 @@ class AudioPlayerService extends ChangeNotifier {
     if (index != null) {
       if (index < 0 || index >= _playlist.length) return false;
 
-      // Ensure streaming info ready if needed
+      // Ensure streaming/local info ready if needed
       await _ensureTrackReady(index);
       if (!_playlist[index].isReady) {
-        // Try one more time with force refresh if it failed
-        await _streamingService.refreshStreamingData(
-          _playlist[index].videoId,
-          _getPreferredQuality(),
-        );
-        // Re-check
-        await _ensureTrackReady(index);
+        // Local tracks should never trigger network refresh during resume.
+        if (_playlist[index].isLocal) {
+          // Best-effort: attempt to re-mark availability / content:// fallback.
+          final fixed = _normalizeRestoredTrack(_playlist[index]);
+          _playlist[index] = fixed;
+        } else {
+          // Try one more time with force refresh if it failed
+          await _streamingService.refreshStreamingData(
+            _playlist[index].videoId,
+            _getPreferredQuality(),
+          );
+          // Re-check
+          await _ensureTrackReady(index);
+        }
         if (!_playlist[index].isReady) return false;
       }
 
@@ -1666,8 +1930,64 @@ class AudioPlayerService extends ChangeNotifier {
   Future<void> _ensureTrackReady(int index, {int? requestId}) async {
     if (index >= _playlist.length) return;
 
-    // Skip network fetch for local files
-    if (_playlist[index].isLocal) return;
+    // Local tracks: ensure availability + ensure present in audio source, but never hit network.
+    if (_playlist[index].isLocal) {
+      final t = _playlist[index];
+
+      StreamingData fixed = t;
+      final raw = (t.streamUrl ?? '').trim();
+      if (raw.isNotEmpty && _isContentUri(raw)) {
+        if (!t.isAvailable) {
+          fixed = t.copyWith(isAvailable: true, isLocal: true);
+        }
+      } else if (raw.isEmpty && Platform.isAndroid) {
+        final localId = t.localId ?? _tryParseLocalIdFromVideoId(t.videoId);
+        if (localId != null) {
+          fixed = t.copyWith(
+            isAvailable: true,
+            isLocal: true,
+            streamUrl: _androidContentUriForLocalId(localId),
+            localId: t.localId ?? localId,
+          );
+        }
+      } else if (raw.isNotEmpty && !_isHttpUrl(raw)) {
+        final path = _stripFileScheme(raw);
+        bool exists = true;
+        try {
+          exists = File(path).existsSync();
+        } catch (_) {
+          exists = true;
+        }
+        if (!exists && Platform.isAndroid) {
+          final localId = t.localId ?? _tryParseLocalIdFromVideoId(t.videoId);
+          if (localId != null) {
+            fixed = t.copyWith(
+              isAvailable: true,
+              isLocal: true,
+              streamUrl: _androidContentUriForLocalId(localId),
+              localId: t.localId ?? localId,
+            );
+          } else {
+            fixed = t.copyWith(isAvailable: exists, isLocal: true);
+          }
+        } else {
+          fixed = t.copyWith(isAvailable: exists, isLocal: true);
+        }
+      }
+
+      if (!identical(fixed, t)) {
+        _playlist[index] = fixed;
+      }
+
+      if (_playlist[index].isReady && !_childToPlaylistIndex.contains(index)) {
+        await _rebuildAudioSource(
+          preferPlaylistIndex: _currentIndex,
+          preservePosition: true,
+          requestId: requestId,
+        );
+      }
+      return;
+    }
 
     final track = _playlist[index];
     if (!track.isReady) {
@@ -1718,7 +2038,7 @@ class AudioPlayerService extends ChangeNotifier {
     try {
       // Collect all tracks that aren't ready yet
       final pending = _playlist
-          .where((t) => !t.isReady || t.streamUrl == null)
+          .where((t) => !t.isLocal && (!t.isReady || t.streamUrl == null))
           .map((t) => t.videoId)
           .toList();
       if (pending.isEmpty) return;
@@ -1820,7 +2140,9 @@ class AudioPlayerService extends ChangeNotifier {
         for (int i = 0; i < _playlist.length; i++) {
           final t = _playlist[i];
           if (t.isReady && t.streamUrl != null) {
-            final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
+            final raw = t.streamUrl!;
+            final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+            final headers = _headersForPlayableUri(uri);
             final tag = MediaItem(
               id: t.videoId,
               title: t.title,
@@ -1833,19 +2155,19 @@ class AudioPlayerService extends ChangeNotifier {
 
             // Use LockCachingAudioSource for remote streams if not using MediaKit
             // MediaKit backend might not support the proxy URL, so we skip cache for it.
-            final useCache = !t.isLocal && uri.scheme.startsWith('http');
+            final useCache = _shouldUseCacheForPlayableUri(uri);
 
             if (useCache) {
               children.add(
                 LockCachingAudioSource(
                   uri,
                   tag: tag,
-                  headers: _headers,
+                  headers: headers,
                   // cacheKey: t.videoId, // Not supported in this version of just_audio_cache?
                 ),
               );
             } else {
-              children.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+              children.add(AudioSource.uri(uri, tag: tag, headers: headers));
             }
             readyIndices.add(i);
           }
@@ -1860,7 +2182,9 @@ class AudioPlayerService extends ChangeNotifier {
       for (int i = 0; i < _playlist.length; i++) {
         final t = _playlist[i];
         if (t.isReady && t.streamUrl != null) {
-          final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
+          final raw = t.streamUrl!;
+          final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+          final headers = _headersForPlayableUri(uri);
           final tag = MediaItem(
             id: t.videoId,
             title: t.title,
@@ -1871,19 +2195,19 @@ class AudioPlayerService extends ChangeNotifier {
             extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
           );
 
-          final useCache = !t.isLocal && uri.scheme.startsWith('http');
+          final useCache = _shouldUseCacheForPlayableUri(uri);
 
           if (useCache) {
             children.add(
               LockCachingAudioSource(
                 uri,
                 tag: tag,
-                headers: _headers,
+                headers: headers,
                 // cacheKey: t.videoId,
               ),
             );
           } else {
-            children.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+            children.add(AudioSource.uri(uri, tag: tag, headers: headers));
           }
           readyIndices.add(i);
         }
@@ -1979,6 +2303,13 @@ class AudioPlayerService extends ChangeNotifier {
               _childToPlaylistIndex.length - 1,
             )]
           : _currentIndex;
+      // Only attempt network refresh for HTTP(S) streams.
+      final failingRaw = _playlist[failingPlaylistIndex].streamUrl;
+      if (failingRaw == null) rethrow;
+      final failingUri =
+          _toPlayableUri(failingRaw, isLocal: _looksLikeFilePath(failingRaw));
+      if (!_isHttpUri(failingUri)) rethrow;
+
       final refreshed = await _streamingService.refreshStreamingData(
         _playlist[failingPlaylistIndex].videoId,
         _getPreferredQuality(),
@@ -2002,10 +2333,13 @@ class AudioPlayerService extends ChangeNotifier {
         for (int i = 0; i < _playlist.length; i++) {
           final t = _playlist[i];
           if (t.isReady && t.streamUrl != null) {
+            final raw = t.streamUrl!;
+            final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+            final headers = _headersForPlayableUri(uri);
             retryChildren.add(
               AudioSource.uri(
-                _toPlayableUri(t.streamUrl!, isLocal: t.isLocal),
-                headers: _headers,
+                uri,
+                headers: headers,
                 tag: MediaItem(
                   id: t.videoId,
                   title: t.title,
@@ -2115,7 +2449,9 @@ class AudioPlayerService extends ChangeNotifier {
   }) async {
     final t = _playlist[playlistIndex];
     if (!t.isReady || t.streamUrl == null) return;
-    final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
+    final raw = t.streamUrl!;
+    final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+    final headers = _headersForPlayableUri(uri);
     _setMinimalChildMapping(playlistIndex);
     try {
       // Use setAudioSource to create a ConcatenatingAudioSource with 1 item
@@ -2129,18 +2465,18 @@ class AudioPlayerService extends ChangeNotifier {
         extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
       );
 
-      final useCache = !t.isLocal && uri.scheme.startsWith('http');
+      final useCache = _shouldUseCacheForPlayableUri(uri);
 
       AudioSource source;
       if (useCache) {
         source = LockCachingAudioSource(
           uri,
           tag: tag,
-          headers: _headers,
+          headers: headers,
           // cacheKey: t.videoId,
         );
       } else {
-        source = AudioSource.uri(uri, tag: tag, headers: _headers);
+        source = AudioSource.uri(uri, tag: tag, headers: headers);
       }
 
       await _player.setAudioSource(
@@ -2220,7 +2556,9 @@ class AudioPlayerService extends ChangeNotifier {
     final sources = <AudioSource>[];
     for (final idx in indicesToAdd) {
       final t = _playlist[idx];
-      final uri = _toPlayableUri(t.streamUrl!, isLocal: t.isLocal);
+      final raw = t.streamUrl!;
+      final uri = _toPlayableUri(raw, isLocal: _looksLikeFilePath(raw));
+      final headers = _headersForPlayableUri(uri);
       final tag = MediaItem(
         id: t.videoId,
         title: t.title,
@@ -2230,17 +2568,17 @@ class AudioPlayerService extends ChangeNotifier {
         extras: {'videoId': t.videoId, 'isLocal': t.isLocal},
       );
 
-      final useCache = !t.isLocal && uri.scheme.startsWith('http');
+      final useCache = _shouldUseCacheForPlayableUri(uri);
       if (useCache) {
         sources.add(
           LockCachingAudioSource(
             uri,
             tag: tag,
-            headers: _headers,
+            headers: headers,
           ),
         );
       } else {
-        sources.add(AudioSource.uri(uri, tag: tag, headers: _headers));
+        sources.add(AudioSource.uri(uri, tag: tag, headers: headers));
       }
     }
 
