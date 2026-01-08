@@ -114,4 +114,61 @@ class LibraryStore {
     final box = await _openBox(HiveBoxes.recentPlays);
     await box.clear();
   }
+
+  // Queue persistence helpers
+  static const String _kCurrentQueueKey = 'current_queue';
+
+  static Future<void> saveQueue(List<StreamingData> queue) async {
+    final box = await _openBox(HiveBoxes.queue);
+    final payload = queue.map((t) => t.toJson()).toList(growable: false);
+    await box.put(_kCurrentQueueKey, jsonEncode(payload));
+  }
+
+  static Future<List<StreamingData>> loadQueue() async {
+    final box = await _openBox(HiveBoxes.queue);
+    final raw = box.get(_kCurrentQueueKey);
+    if (raw == null) return <StreamingData>[];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .whereType<Map<String, dynamic>>()
+          .map((m) => StreamingData.fromJson(m))
+          .toList();
+    } catch (_) {
+      await box.delete(_kCurrentQueueKey);
+      return <StreamingData>[];
+    }
+  }
+
+  static Future<void> appendToQueue(StreamingData track) async {
+    final q = await loadQueue();
+    q.add(track);
+    await saveQueue(q);
+  }
+
+  static Future<void> insertNext(StreamingData track) async {
+    final q = await loadQueue();
+    q.insert(0, track);
+    await saveQueue(q);
+  }
+
+  static Future<void> removeFromQueue(String videoId) async {
+    final q = await loadQueue();
+    q.removeWhere((t) => t.videoId == videoId);
+    await saveQueue(q);
+  }
+
+  static Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    final q = await loadQueue();
+    if (oldIndex < 0 || oldIndex >= q.length) return;
+    final item = q.removeAt(oldIndex);
+    final insertIndex = newIndex.clamp(0, q.length);
+    q.insert(insertIndex, item);
+    await saveQueue(q);
+  }
+
+  static Future<void> clearQueue() async {
+    final box = await _openBox(HiveBoxes.queue);
+    await box.delete(_kCurrentQueueKey);
+  }
 }

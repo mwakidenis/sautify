@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
 import 'package:sautifyv2/services/dio_client.dart';
+import 'package:sautifyv2/services/settings_service.dart';
 
 import '../apis/api.dart';
 import '../models/music_model.dart';
@@ -24,9 +25,17 @@ class Api implements MusicAPI {
     }
     // 1) Try unified streaming service (with cache + fallback providers)
     try {
+      final settings = SettingsService();
+      if (!settings.isReady) {
+        // Best-effort: if settings aren't ready, fall back to defaults.
+        try {
+          await settings.init();
+        } catch (_) {}
+      }
       final StreamingData? data = await _service.fetchStreamingData(
         videoId,
         StreamingQuality.medium,
+        preference: settings.streamingResolverPreference,
       );
       if (data != null && data.streamUrl != null) {
         musicMetaData = _toMetadata(data);

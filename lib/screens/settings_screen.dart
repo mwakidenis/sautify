@@ -12,7 +12,9 @@ import 'package:sautifyv2/blocs/settings/settings_cubit.dart';
 import 'package:sautifyv2/blocs/settings/settings_state.dart';
 import 'package:sautifyv2/constants/ui_colors.dart';
 import 'package:sautifyv2/l10n/strings.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 import 'package:sautifyv2/screens/equalizer_screen.dart';
+import 'package:sautifyv2/services/settings_service.dart';
 import 'package:sautifyv2/services/update_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -64,7 +66,6 @@ class SettingsScreen extends StatelessWidget {
                   _dropdownTile<String>(
                     context,
                     title: 'App font',
-                    subtitle: 'Changes text across the app',
                     current: state.appFont,
                     items: const [
                       'system',
@@ -193,6 +194,23 @@ class SettingsScreen extends StatelessWidget {
                       }
                     },
                     onChanged: (v) => settingsCubit.setPreferredQuality(v),
+                  ),
+                  _tileDivider(),
+                  _dropdownTile<StreamingResolverPreference>(
+                    context,
+                    title: 'Streaming source',
+                    subtitle: 'Default = API then YTExplode fallback',
+                    current: state.streamingResolverPreference,
+                    items: StreamingResolverPreference.values,
+                    itemLabel: (v) => v.uiLabel,
+                    onChanged: (v) {
+                      settingsCubit.setStreamingResolverPreference(v);
+                      // Keep SettingsService updated too (AudioPlayerService reads it).
+                      // ignore: discarded_futures
+                      SettingsService()
+                          .setStreamingResolverPreference(v)
+                          .catchError((_) {});
+                    },
                   ),
                   _tileDivider(),
                   ListTile(
@@ -561,21 +579,29 @@ class SettingsScreen extends StatelessWidget {
               subtitle,
               style: TextStyle(color: txtcolor.withAlpha(160), fontSize: 12),
             ),
-      trailing: DropdownButton<T>(
-        value: current,
-        dropdownColor: Theme.of(context).cardColor,
-        style: TextStyle(color: txtcolor),
-        iconEnabledColor: Theme.of(context).colorScheme.primary,
-        underline: const SizedBox.shrink(),
-        onChanged: (v) => v == null ? null : onChanged(v),
-        items: items
-            .map(
-              (e) => DropdownMenuItem<T>(
-                value: e,
-                child: Text(itemLabel(e), style: TextStyle(color: txtcolor)),
-              ),
-            )
-            .toList(),
+      trailing: SizedBox(
+        width: 160,
+        child: DropdownButton<T>(
+          isExpanded: true,
+          value: current,
+          dropdownColor: Theme.of(context).cardColor,
+          style: TextStyle(color: txtcolor),
+          iconEnabledColor: Theme.of(context).colorScheme.primary,
+          underline: const SizedBox.shrink(),
+          onChanged: (v) => v == null ? null : onChanged(v),
+          items: items
+              .map(
+                (e) => DropdownMenuItem<T>(
+                  value: e,
+                  child: Text(
+                    itemLabel(e),
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: txtcolor),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
       ),
     );
   }

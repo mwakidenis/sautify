@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_lyric/flutter_lyric.dart' as fl;
 import 'package:just_audio/just_audio.dart' as ja;
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:marquee/marquee.dart';
@@ -56,12 +57,16 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   bool _started = false;
 
+  late final fl.LyricController _lyricController;
+  String? _loadedLyricKey;
+
   Timer? _sleepTimer;
   DateTime? _sleepTimerEndsAt;
 
   @override
   void initState() {
     super.initState();
+    _lyricController = fl.LyricController();
     _startPlaybackOnce();
   }
 
@@ -72,6 +77,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (_) {}
     _sleepTimer = null;
     _sleepTimerEndsAt = null;
+    _lyricController.dispose();
     super.dispose();
   }
 
@@ -423,7 +429,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           children: [
                             _buildTopBar(context, audioState),
                             const Spacer(),
-                            _buildAlbumArt(context, track, playerState),
+                            _buildAlbumArt(
+                              context,
+                              track,
+                              playerState,
+                              audioState.position,
+                            ),
                             const Spacer(),
                             _buildSongInfo(context, track, currentTitle,
                                 currentArtist, audioState),
@@ -521,7 +532,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildAlbumArt(
-      BuildContext context, StreamingData? track, PlayerState playerState) {
+    BuildContext context,
+    StreamingData? track,
+    PlayerState playerState,
+    Duration progress,
+  ) {
     return Expanded(
       flex: 5,
       child: Stack(
@@ -574,7 +589,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           if (playerState.showLyrics)
             Positioned.fill(
-              child: _buildLyricsOverlay(context, playerState, track),
+              child: _buildLyricsOverlay(
+                context,
+                playerState,
+                track,
+                progress,
+              ),
             ),
         ],
       ),
@@ -591,7 +611,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildLyricsOverlay(
-      BuildContext context, PlayerState state, StreamingData? track) {
+    BuildContext context,
+    PlayerState state,
+    StreamingData? track,
+    Duration progress,
+  ) {
     if (state.lyricsLoading) {
       return Center(
           child: CircularProgressIndicatorM3E(
@@ -608,43 +632,74 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return const Center(child: Text("No lyrics found"));
     }
 
+    // Load lyric into controller only when necessary.
+    final videoId = track?.videoId ?? widget.videoId ?? '';
+    final firstStart =
+        state.lyrics.isNotEmpty ? state.lyrics.first.startTimeMs : 0;
+    final lastStart =
+        state.lyrics.isNotEmpty ? state.lyrics.last.startTimeMs : 0;
+    final nextKey = '$videoId|${state.lyrics.length}|$firstStart|$lastStart';
+    if (_loadedLyricKey != nextKey) {
+      _loadedLyricKey = nextKey;
+      _lyricController.loadLyric(_toLrc(state.lyrics));
+    }
+
+    // Drive highlight + scroll from playback progress.
+    _lyricController.setProgress(progress);
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.black.withAlpha(150),
         borderRadius: BorderRadius.circular(24),
       ),
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-        itemCount: state.lyrics.length,
-        itemBuilder: (context, index) {
-          final line = state.lyrics[index];
-          final isActive = index == state.activeLyricIndex;
-
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Text(
-              line.text,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: isActive ? 22 : 18,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                color: isActive ? Colors.white : Colors.white.withAlpha(150),
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final baseStyle = fl.LyricStyles.default1;
+          final style = baseStyle.copyWith(
+            disableTouchEvent: false,
+            contentPadding:
+                const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+            textStyle: const TextStyle(
+              fontSize: 18,
+              color: Color(0x99FFFFFF),
             ),
+            activeStyle: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          );
+
+          return fl.LyricView(
+            controller: _lyricController,
+            style: style,
+            width: constraints.maxWidth,
+            height: constraints.maxHeight,
           );
         },
       ),
     );
   }
 
+  String _toLrc(List<LyricLine> lines) {
+    final buffer = StringBuffer();
+    for (final line in lines) {
+      final t = Duration(milliseconds: line.startTimeMs);
+      final mm = t.inMinutes.toString().padLeft(2, '0');
+      final ss = (t.inSeconds % 60).toString().padLeft(2, '0');
+      final xx = ((t.inMilliseconds % 1000) ~/ 10).toString().padLeft(2, '0');
+      buffer.writeln('[$mm:$ss.$xx]${line.text}');
+    }
+    return buffer.toString();
+  }
+
   Widget _buildSongInfo(BuildContext context, StreamingData? track,
       String title, String artist, AudioPlayerState audioState) {
     return BlocBuilder<LibraryCubit, LibraryState>(
       builder: (context, libraryState) {
-        final isLiked = track != null &&
-            libraryState.favorites.any((s) => s.videoId == track.videoId);
-
         final current = audioState.currentTrack ?? track;
+        final isLiked = current != null &&
+            libraryState.favorites.any((s) => s.videoId == current.videoId);
         final isOffline =
             (audioState.sourceType ?? '').toUpperCase() == 'OFFLINE';
         final isLocalTrack = (current?.isLocal ?? false) ||
@@ -766,8 +821,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 size: 28,
               ),
               onPressed: () {
-                if (track != null) {
-                  context.read<LibraryCubit>().toggleFavorite(track);
+                if (current != null) {
+                  context.read<LibraryCubit>().toggleFavorite(current);
                 }
               },
             ),

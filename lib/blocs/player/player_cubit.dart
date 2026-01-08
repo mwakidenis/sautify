@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dart_ytmusic_api/yt_music.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:sautifyv2/blocs/theme/theme_cubit.dart';
+import 'package:sautifyv2/services/lyrics_cache.dart';
 
 import 'player_state.dart';
 
@@ -10,6 +11,7 @@ class PlayerCubit extends Cubit<PlayerState> {
   final ThemeCubit _themeCubit;
   final YTMusic _ytmusic = YTMusic();
   final Map<String, List<LyricLine>> _lyricsCache = {};
+  final LyricsCache _lyricsPersistentCache = LyricsCache();
   bool _ytReady = false;
 
   PlayerCubit(this._themeCubit) : super(const PlayerState()) {
@@ -50,6 +52,20 @@ class PlayerCubit extends Cubit<PlayerState> {
       return;
     }
 
+    // Try persisted offline cache first.
+    final persisted = await _lyricsPersistentCache.get(videoId);
+    if (persisted != null && persisted.lines.isNotEmpty) {
+      _lyricsCache[videoId] = persisted.lines;
+      emit(state.copyWith(
+        lyrics: persisted.lines,
+        lyricsSource: persisted.source,
+        lyricsLoading: false,
+        lyricsError: null,
+        showLyrics: true,
+      ));
+      return;
+    }
+
     emit(state.copyWith(
       lyricsLoading: true,
       lyricsError: null,
@@ -63,6 +79,7 @@ class PlayerCubit extends Cubit<PlayerState> {
       final synclyrics = await _ytmusic.getTimedLyrics(videoId);
       List<LyricLine> resolved = [];
       String? source;
+      String? resolvedFromVideoId;
 
       if (synclyrics != null && synclyrics.timedLyricsData.isNotEmpty) {
         resolved = synclyrics.timedLyricsData
@@ -75,6 +92,7 @@ class PlayerCubit extends Cubit<PlayerState> {
             .where((l) => l.text.trim().isNotEmpty)
             .toList();
         source = synclyrics.sourceMessage;
+        resolvedFromVideoId = videoId;
       }
 
       if (resolved.isEmpty) {
@@ -96,6 +114,7 @@ class PlayerCubit extends Cubit<PlayerState> {
                     .where((l) => l.text.trim().isNotEmpty)
                     .toList();
                 source = altLyrics.sourceMessage;
+                resolvedFromVideoId = altVid;
                 break;
               }
             }
@@ -110,6 +129,14 @@ class PlayerCubit extends Cubit<PlayerState> {
         ));
       } else {
         _lyricsCache[videoId] = resolved;
+        unawaited(
+            _lyricsPersistentCache.set(videoId, resolved, source: source));
+        if (resolvedFromVideoId != null && resolvedFromVideoId != videoId) {
+          final altId = resolvedFromVideoId;
+          unawaited(
+            _lyricsPersistentCache.set(altId, resolved, source: source),
+          );
+        }
         emit(state.copyWith(
           lyrics: resolved,
           lyricsSource: source,

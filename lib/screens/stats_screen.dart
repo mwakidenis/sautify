@@ -96,7 +96,7 @@ Widget _buildTrackArtwork(BuildContext context, StreamingData track) {
   );
 }
 
-enum _ListeningKey { recent, most }
+enum _ListeningKey { recent, most, favorites }
 
 class _ListeningCard extends StatefulWidget {
   const _ListeningCard();
@@ -156,6 +156,10 @@ class _ListeningCardState extends State<_ListeningCard> {
                         value: _ListeningKey.most,
                         label: Text('Most played'),
                       ),
+                      ButtonSegment(
+                        value: _ListeningKey.favorites,
+                        label: Text('Favorites'),
+                      ),
                     ],
                     selected: {_selected},
                     onSelectionChanged: (selection) {
@@ -171,13 +175,102 @@ class _ListeningCardState extends State<_ListeningCard> {
                   duration: const Duration(milliseconds: 200),
                   child: _selected == _ListeningKey.recent
                       ? const _RecentlyPlayedTab(key: ValueKey('recent'))
-                      : const _MostPlayedTab(key: ValueKey('most')),
+                      : _selected == _ListeningKey.most
+                          ? const _MostPlayedTab(key: ValueKey('most'))
+                          : const _FavoritesTab(key: ValueKey('favorites')),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FavoritesTab extends StatelessWidget {
+  const _FavoritesTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<LibraryCubit, LibraryState>(
+      builder: (context, state) {
+        if (!state.isReady) {
+          return const Center(
+            child: LoadingIndicatorM3E(
+              variant: LoadingIndicatorM3EVariant.contained,
+              constraints: BoxConstraints(maxWidth: 50, maxHeight: 50),
+            ),
+          );
+        }
+        if (state.favorites.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.favorite_border, size: 64, color: Colors.grey[800]),
+                const SizedBox(height: 16),
+                Text(
+                  'No favorites yet',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final tracks = state.favorites;
+        return ListView.builder(
+          itemCount: tracks.length,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemBuilder: (context, index) {
+            final track = MetadataOverridesStore.maybeApplySync(tracks[index]);
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withAlpha(30),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary.withAlpha(50),
+                  width: 1,
+                ),
+              ),
+              child: ListTile(
+                leading: _buildTrackArtwork(context, track),
+                title: Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  track.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.color
+                        ?.withAlpha(180),
+                  ),
+                ),
+                onTap: () {
+                  AudioPlayerService().loadPlaylist(
+                    [track],
+                    autoPlay: true,
+                    sourceName: 'Favorites',
+                    sourceType: 'FAVORITES',
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

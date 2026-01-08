@@ -12,6 +12,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'services/dio_client.dart';
@@ -81,6 +82,8 @@ class MusicStreamingService {
   Future<BatchProcessingResult> batchGetStreamingUrls(
     List<String> videoIds, {
     StreamingQuality quality = StreamingQuality.medium,
+    StreamingResolverPreference preference =
+        StreamingResolverPreference.defaultMode,
   }) async {
     final stopwatch = Stopwatch()..start();
     final successful = <StreamingData>[];
@@ -92,7 +95,7 @@ class MusicStreamingService {
         continue;
       }
       futures.add(() async {
-        final r = await _processVideoId(id, quality);
+        final r = await _processVideoId(id, quality, preference);
         if (r != null) {
           successful.add(r);
           _addToCache(id, r);
@@ -115,6 +118,7 @@ class MusicStreamingService {
   Future<StreamingData?> _processVideoId(
     String videoId,
     StreamingQuality quality,
+    StreamingResolverPreference preference,
   ) async {
     if (_isLocalId(videoId)) return null;
     // Check memory cache first
@@ -126,7 +130,7 @@ class MusicStreamingService {
       final age = DateTime.now().difference(cached.cachedAt);
       if (age >= _nearExpiryRefreshThreshold) {
         // ignore: discarded_futures
-        _refreshInBackground(videoId, quality);
+        _refreshInBackground(videoId, quality, preference);
       }
       return cached;
     }
@@ -144,6 +148,7 @@ class MusicStreamingService {
         final result = await _fetchStreamingDataHedgedWithRetry(
           videoId,
           quality,
+          preference,
         );
         if (result != null) {
           _addToCache(videoId, result);
@@ -171,11 +176,16 @@ class MusicStreamingService {
   Future<StreamingData?> _fetchStreamingDataHedgedWithRetry(
     String videoId,
     StreamingQuality quality,
+    StreamingResolverPreference preference,
   ) async {
     if (_isLocalId(videoId)) return null;
     for (int attempt = 1; attempt <= _retryAttempts; attempt++) {
       try {
-        final result = await _fetchStreamingDataHedged(videoId, quality);
+        final result = await _fetchStreamingDataHedged(
+          videoId,
+          quality,
+          preference,
+        );
         if (result != null) return result;
       } catch (e) {
         if (kDebugMode) {
@@ -192,8 +202,10 @@ class MusicStreamingService {
   /// Fetch streaming data from multiple providers (public method)
   Future<StreamingData?> fetchStreamingData(
     String videoId,
-    StreamingQuality quality,
-  ) async {
+    StreamingQuality quality, {
+    StreamingResolverPreference preference =
+        StreamingResolverPreference.defaultMode,
+  }) async {
     // Guard: local device tracks should never be resolved via network.
     if (_isLocalId(videoId)) {
       return null;
@@ -205,7 +217,11 @@ class MusicStreamingService {
     _inflight[videoId] = completer.future;
     () async {
       try {
-        final r = await _fetchStreamingDataHedgedWithRetry(videoId, quality);
+        final r = await _fetchStreamingDataHedgedWithRetry(
+          videoId,
+          quality,
+          preference,
+        );
         if (r != null) {
           _addToCache(videoId, r);
           // ignore: discarded_futures
@@ -225,14 +241,20 @@ class MusicStreamingService {
   /// from expired links or transient load failures while playing.
   Future<StreamingData?> refreshStreamingData(
     String videoId,
-    StreamingQuality quality,
-  ) async {
+    StreamingQuality quality, {
+    StreamingResolverPreference preference =
+        StreamingResolverPreference.defaultMode,
+  }) async {
     // Guard: local device tracks should never be resolved via network.
     if (_isLocalId(videoId)) {
       return null;
     }
     try {
-      final fresh = await _fetchStreamingDataHedgedWithRetry(videoId, quality);
+      final fresh = await _fetchStreamingDataHedgedWithRetry(
+        videoId,
+        quality,
+        preference,
+      );
       if (fresh != null) {
         _addToCache(videoId, fresh);
         // ignore: discarded_futures
@@ -257,59 +279,44 @@ class MusicStreamingService {
   Future<StreamingData?> _fetchStreamingDataHedged(
     String videoId,
     StreamingQuality quality,
+    StreamingResolverPreference preference,
   ) async {
     if (_isLocalId(videoId)) return null;
     final sw = Stopwatch()..start();
-    // Launch primary immediately
-    final okatsuFuture = _fetchFromOkatsu(videoId, quality);
-    // Launch fallback slightly delayed to give primary a head-start (tail latency reduction)
-    final explodeFuture = Future.delayed(
-      const Duration(milliseconds: 50),
-      () => _fetchFromYouTubeExplode(videoId, quality),
-    );
-    final winner = await _firstSuccess([okatsuFuture, explodeFuture]);
+    StreamingData? winner;
+    switch (preference) {
+      case StreamingResolverPreference.apiOnly:
+        winner = await _fetchFromOkatsu(videoId, quality);
+        break;
+      case StreamingResolverPreference.ytExplodeOnly:
+        winner = await _fetchFromYouTubeExplode(videoId, quality);
+        break;
+      case StreamingResolverPreference.defaultMode:
+        // Default behavior: API first, fallback to YTExplode only if API fails.
+        winner = await _fetchFromOkatsu(videoId, quality);
+        winner ??= await _fetchFromYouTubeExplode(videoId, quality);
+        break;
+    }
     sw.stop();
     if (kDebugMode) {
       debugPrint(
-        '[resolve] vid=$videoId hedged=${sw.elapsedMilliseconds}ms winner=${winner?.quality}',
+        '[resolve] vid=$videoId pref=${preference.prefValue} time=${sw.elapsedMilliseconds}ms winner=${winner?.quality}',
       );
     }
     return winner;
   }
 
-  Future<StreamingData?> _firstSuccess(
-    List<Future<StreamingData?>> futures,
-  ) async {
-    final completer = Completer<StreamingData?>();
-    int remaining = futures.length;
-    void tryComplete() {
-      if (remaining == 0 && !completer.isCompleted) {
-        completer.complete(null);
-      }
-    }
-
-    for (final f in futures) {
-      f.then((value) {
-        if (value != null && !completer.isCompleted) {
-          completer.complete(value);
-        } else {
-          remaining--;
-          tryComplete();
-        }
-      }).catchError((_) {
-        remaining--;
-        tryComplete();
-      });
-    }
-    return completer.future;
-  }
-
-  void _refreshInBackground(String videoId, StreamingQuality quality) {
+  void _refreshInBackground(
+    String videoId,
+    StreamingQuality quality,
+    StreamingResolverPreference preference,
+  ) {
     () async {
       try {
         final refreshed = await _fetchStreamingDataHedgedWithRetry(
           videoId,
           quality,
+          preference,
         );
         if (refreshed != null) {
           _addToCache(videoId, refreshed);
@@ -547,7 +554,7 @@ class MusicStreamingService {
         isAvailable: true,
       );
     } catch (_) {
-      rethrow;
+      return null;
     }
   }
 

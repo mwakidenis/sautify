@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 
 class SettingsState extends Equatable {
   final bool duckOnInterruption;
@@ -25,6 +26,7 @@ class SettingsState extends Equatable {
   final bool skipSilenceEnabled;
   final bool dynamicThemeEnabled;
   final String appFont;
+  final StreamingResolverPreference streamingResolverPreference;
   final bool isReady;
 
   const SettingsState({
@@ -52,6 +54,7 @@ class SettingsState extends Equatable {
     this.skipSilenceEnabled = false,
     this.dynamicThemeEnabled = false,
     this.appFont = 'poppins',
+    this.streamingResolverPreference = StreamingResolverPreference.defaultMode,
     this.isReady = false,
   });
 
@@ -80,6 +83,7 @@ class SettingsState extends Equatable {
     bool? skipSilenceEnabled,
     bool? dynamicThemeEnabled,
     String? appFont,
+    StreamingResolverPreference? streamingResolverPreference,
     bool? isReady,
   }) {
     return SettingsState(
@@ -111,6 +115,8 @@ class SettingsState extends Equatable {
       skipSilenceEnabled: skipSilenceEnabled ?? this.skipSilenceEnabled,
       dynamicThemeEnabled: dynamicThemeEnabled ?? this.dynamicThemeEnabled,
       appFont: appFont ?? this.appFont,
+      streamingResolverPreference:
+          streamingResolverPreference ?? this.streamingResolverPreference,
       isReady: isReady ?? this.isReady,
     );
   }
@@ -141,6 +147,7 @@ class SettingsState extends Equatable {
         skipSilenceEnabled,
         dynamicThemeEnabled,
         appFont,
+        streamingResolverPreference,
         isReady,
       ];
 }

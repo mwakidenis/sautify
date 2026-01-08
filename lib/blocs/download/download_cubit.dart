@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sautifyv2/blocs/settings/settings_cubit.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
-import 'package:sautifyv2/services/download_service.dart';
+import 'package:sautifyv2/services/download_manager.dart';
 
 import '../../isolate/download_finalize_worker.dart';
 import 'download_state.dart';
@@ -18,6 +19,9 @@ class DownloadCubit extends Cubit<DownloadState> {
   Box<String>? _downloadsBox;
   final SettingsCubit _settingsCubit;
   final MusicStreamingService _streamingService = MusicStreamingService();
+  final DownloadManager _downloadManager = DownloadManager();
+  StreamSubscription<Map<String, dynamic>>? _downloadSub;
+  final Map<String, Map<String, dynamic>> _pendingDownloads = {};
 
   DownloadCubit(this._settingsCubit) : super(const DownloadState());
 
@@ -30,6 +34,14 @@ class DownloadCubit extends Cubit<DownloadState> {
         : await Hive.openBox<String>('downloads_box');
 
     emit(state.copyWith(isInitialized: true));
+    // Ensure we listen to DownloadManager events once and handle finalization
+    _downloadSub ??= _downloadManager.events().listen((ev) async {
+      try {
+        await _handleDownloadEvent(ev);
+      } catch (err) {
+        debugPrint('download event handler failed: $err');
+      }
+    });
     await checkPermissionAndLoad();
   }
 
@@ -143,6 +155,7 @@ class DownloadCubit extends Cubit<DownloadState> {
       final streamingData = await _streamingService.fetchStreamingData(
         track.videoId,
         StreamingQuality.high,
+        preference: _settingsCubit.state.streamingResolverPreference,
       );
 
       final url = streamingData?.streamUrl;
@@ -157,11 +170,17 @@ class DownloadCubit extends Cubit<DownloadState> {
       final fileName = '$safeTitle - $safeArtist$ext';
       final savePath = _joinPath(downloadDir.path, fileName);
 
-      await DownloadService.startDownload(
-        url: url,
-        savePath: savePath,
+      // Register pending info so the centralized event handler can finalize
+      _pendingDownloads[track.videoId] = {
+        'track': track,
+        'savePath': savePath,
+      };
+
+      _downloadManager.startDownload(
+        track.videoId,
+        url,
+        savePath,
         onProgress: (received, total) {
-          // Track progress for UI.
           if (state.activeDownloadVideoId == track.videoId) {
             emit(
               state.copyWith(
@@ -170,54 +189,6 @@ class DownloadCubit extends Cubit<DownloadState> {
               ),
             );
           }
-        },
-        onDone: () {
-          setDownloading(track.videoId, false);
-          () async {
-            // Offload rename + optional cover fetch + tag writing.
-            final result = await compute(
-              finalizeDownloadedFile,
-              <String, dynamic>{
-                'filePath': savePath,
-                'title': track.title,
-                'artist': track.artist,
-                'thumbnailUrl': track.thumbnailUrl,
-              },
-            );
-            final actualPath = (result['finalPath'] as String?) ?? savePath;
-            final taggingAttempted =
-                (result['taggingAttempted'] as bool?) ?? false;
-            final taggingOk = (result['taggingOk'] as bool?) ?? true;
-
-            if (taggingAttempted && !taggingOk) {
-              _emitTargetedEvent(
-                track.videoId,
-                'Downloaded, but tagging failed',
-                isError: true,
-              );
-            }
-
-            // Best-effort: update MediaStore index so device library picks it up.
-            try {
-              await OnAudioQuery().scanMedia(actualPath);
-            } catch (_) {}
-
-            await markAsDownloaded(track, actualPath);
-            _emitTargetedEvent(track.videoId, 'Downloaded', isError: false);
-          }()
-              .catchError((e) {
-            debugPrint('post-download finalize failed: $e');
-            _emitTargetedEvent(
-              track.videoId,
-              'Download finished, but saving failed',
-              isError: true,
-            );
-          });
-        },
-        onError: (error) {
-          setDownloading(track.videoId, false);
-          debugPrint('Download failed: $error');
-          _emitTargetedEvent(track.videoId, error, isError: true);
         },
       );
     } catch (e) {
@@ -255,6 +226,93 @@ class DownloadCubit extends Cubit<DownloadState> {
     await _downloadsBox?.put(track.videoId, jsonEncode(metaJson));
     await loadSongs();
   }
+
+  Future<void> _handleDownloadEvent(Map<String, dynamic> ev) async {
+    final id = ev['id'] as String?;
+    if (id == null) return;
+    final e = ev['event'] as String?;
+
+    if (e == 'progress') {
+      final received = (ev['received'] as int?) ?? 0;
+      final total = (ev['total'] as int?) ?? 0;
+      if (state.activeDownloadVideoId == id) {
+        emit(state.copyWith(progressReceived: received, progressTotal: total));
+      }
+      return;
+    }
+
+    final pending = _pendingDownloads.remove(id);
+
+    if (e == 'done') {
+      setDownloading(id, false);
+      if (pending == null) {
+        _emitTargetedEvent(id, 'Downloaded', isError: false);
+        return;
+      }
+      final track = pending['track'] as StreamingData?;
+      final savePath = pending['savePath'] as String?;
+      if (track == null || savePath == null) {
+        _emitTargetedEvent(id, 'Downloaded', isError: false);
+        return;
+      }
+      try {
+        final result = await compute(
+          finalizeDownloadedFile,
+          <String, dynamic>{
+            'filePath': savePath,
+            'title': track.title,
+            'artist': track.artist,
+            'thumbnailUrl': track.thumbnailUrl,
+          },
+        );
+        final actualPath = (result['finalPath'] as String?) ?? savePath;
+        final taggingAttempted = (result['taggingAttempted'] as bool?) ?? false;
+        final taggingOk = (result['taggingOk'] as bool?) ?? true;
+        if (taggingAttempted && !taggingOk) {
+          _emitTargetedEvent(id, 'Downloaded, but tagging failed',
+              isError: true);
+        }
+        try {
+          await OnAudioQuery().scanMedia(actualPath);
+        } catch (_) {}
+        await markAsDownloaded(track, actualPath);
+        _emitTargetedEvent(id, 'Downloaded', isError: false);
+      } catch (err) {
+        debugPrint('post-download finalize failed: $err');
+        _emitTargetedEvent(id, 'Download finished, but saving failed',
+            isError: true);
+      }
+      return;
+    }
+
+    if (e == 'error' || e == 'cancelled') {
+      setDownloading(id, false);
+      _emitTargetedEvent(id, ev['error']?.toString() ?? 'Download failed',
+          isError: true);
+      return;
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    await _downloadSub?.cancel();
+    return super.close();
+  }
+
+  /// Cancel an in-progress or queued download managed by the DownloadManager.
+  void cancelDownload(String videoId) {
+    // Remove any pending finalize info we stored
+    _pendingDownloads.remove(videoId);
+    _downloadManager.cancel(videoId);
+    setDownloading(videoId, false);
+    _emitTargetedEvent(videoId, 'Cancelled', isError: false);
+  }
+
+  /// Snapshot of queued ids in the manager.
+  List<String> managerQueuedIds() => _downloadManager.queuedIds();
+
+  /// Snapshot of active ids in the manager.
+  List<String> managerActiveIds() => _downloadManager.activeIds();
 
   StreamingData? _streamingDataFromBox(String videoId, String value) {
     // New format: JSON metadata (matches `home_screen.dart`).

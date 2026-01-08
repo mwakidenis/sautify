@@ -85,6 +85,8 @@ Future<void> _handleBuildAndResolve(
 ) async {
   final int requestId = message['requestId'] as int? ?? -1;
   final String quality = (message['quality'] as String?) ?? 'medium';
+  final String resolverPref =
+      (message['resolverPref'] as String?)?.trim().toLowerCase() ?? 'default';
   final List<dynamic> raw = message['tracks'] as List<dynamic>? ?? const [];
   final List<Map<String, dynamic>> resolved = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> failed = <Map<String, dynamic>>[];
@@ -112,6 +114,7 @@ Future<void> _handleBuildAndResolve(
         videoId: t['videoId'] as String,
         quality: quality,
         httpClient: httpClient,
+        resolverPref: resolverPref,
       );
       if (r != null) {
         resolved.add({
@@ -145,22 +148,39 @@ Future<Map<String, dynamic>?> _resolveStreaming({
   required String videoId,
   required String quality,
   required HttpClient httpClient,
+  required String resolverPref,
 }) async {
-  // Try Okatsu first
+  final pref = resolverPref;
+
+  if (pref == 'api') {
+    return await _resolveViaOkatsu(httpClient, videoId);
+  }
+  if (pref == 'ytexplode' || pref == 'yt_explode' || pref == 'yt-explode') {
+    return await _resolveViaYouTubeExplode(yt, videoId, quality);
+  }
+
+  // Default: Try Okatsu first, then fallback to YouTubeExplode.
   final okatsu = await _resolveViaOkatsu(httpClient, videoId);
   if (okatsu != null) return okatsu;
 
-  // Fallback to YouTubeExplode
+  return await _resolveViaYouTubeExplode(yt, videoId, quality);
+}
+
+Future<Map<String, dynamic>?> _resolveViaYouTubeExplode(
+  YoutubeExplode yt,
+  String videoId,
+  String quality,
+) async {
   try {
     final video = await yt.videos.get(videoId);
     final manifest = await yt.videos.streamsClient.getManifest(videoId);
-    final preferMp4 = Platform.isIOS || Platform.isMacOS;
+    // Prefer MP4 (m4a) to keep downloaded files taggable.
     final audioOnly = manifest.audioOnly.toList();
     Iterable<AudioStreamInfo> preferred = audioOnly.where(
-      (s) => preferMp4 ? s.container.name == 'mp4' : s.container.name == 'webm',
+      (s) => s.container.name == 'mp4' || s.container.name == 'm4a',
     );
     Iterable<AudioStreamInfo> alt = audioOnly.where(
-      (s) => preferMp4 ? s.container.name != 'mp4' : s.container.name != 'webm',
+      (s) => s.container.name != 'mp4',
     );
     int minBps;
     switch (quality) {
@@ -249,6 +269,8 @@ Future<void> _handleBuildAndResolveProgressive(
 ) async {
   final int requestId = message['requestId'] as int? ?? -1;
   final String quality = (message['quality'] as String?) ?? 'medium';
+  final String resolverPref =
+      (message['resolverPref'] as String?)?.trim().toLowerCase() ?? 'default';
   final int priorityIndex = message['priorityIndex'] as int? ?? 0;
   final int configuredBatchSize = message['batchSize'] as int? ?? 6;
   final int concurrency = message['concurrency'] as int? ?? 4;
@@ -317,6 +339,7 @@ Future<void> _handleBuildAndResolveProgressive(
             videoId: t['videoId'] as String,
             quality: quality,
             httpClient: httpClient,
+            resolverPref: resolverPref,
           );
         }
         if (r != null) {

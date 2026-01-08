@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'settings_state.dart';
@@ -40,6 +41,7 @@ class SettingsCubit extends Cubit<SettingsState> {
   static const _kSkipSilenceEnabled = 'skip_silence_enabled';
   static const _kDynamicThemeEnabled = 'dynamic_theme_enabled';
   static const _kAppFont = 'app_font';
+  static const _kStreamingResolverPreference = 'streaming_resolver_preference';
 
   static const Set<String> _allowedFonts = {
     'system',
@@ -153,6 +155,11 @@ class SettingsCubit extends Cubit<SettingsState> {
     final resolvedAppFont =
         _allowedFonts.contains(appFont) ? appFont : 'poppins';
 
+    final streamingResolverPreference =
+        StreamingResolverPreferencePrefs.fromPrefValue(
+      _prefs.getString(_kStreamingResolverPreference),
+    );
+
     Map<int, double> equalizerBands = {};
     final loadedBands = _prefs.getString(_kEqualizerBands);
     if (loadedBands != null) {
@@ -196,8 +203,16 @@ class SettingsCubit extends Cubit<SettingsState> {
       skipSilenceEnabled: skipSilenceEnabled,
       dynamicThemeEnabled: dynamicThemeEnabled,
       appFont: resolvedAppFont,
+      streamingResolverPreference: streamingResolverPreference,
       isReady: true,
     ));
+  }
+
+  Future<void> setStreamingResolverPreference(
+    StreamingResolverPreference value,
+  ) async {
+    await _prefs.setString(_kStreamingResolverPreference, value.prefValue);
+    emit(state.copyWith(streamingResolverPreference: value));
   }
 
   Future<void> setAppFont(String value) async {
@@ -360,6 +375,10 @@ class SettingsCubit extends Cubit<SettingsState> {
     await _prefs.setInt(_kBassBoostStrength, newState.bassBoostStrength);
     await _prefs.setBool(_kSkipSilenceEnabled, newState.skipSilenceEnabled);
     await _prefs.setBool(_kDynamicThemeEnabled, newState.dynamicThemeEnabled);
+    await _prefs.setString(
+      _kStreamingResolverPreference,
+      newState.streamingResolverPreference.prefValue,
+    );
 
     emit(newState);
   }

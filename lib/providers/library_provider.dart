@@ -147,6 +147,81 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Library browsing helpers
+  List<StreamingData> getAllSongs() {
+    final songs = <StreamingData>[];
+
+    // Favorites
+    songs.addAll(getFavorites());
+
+    // Recent plays
+    songs.addAll(getRecentPlays());
+
+    // Playlists
+    final playlists = getPlaylists();
+    for (final p in playlists) {
+      songs.addAll(p.tracks);
+    }
+
+    // Albums
+    final albums = getAlbums();
+    for (final a in albums) {
+      songs.addAll(a.tracks);
+    }
+
+    // Deduplicate by videoId, keep first-seen
+    final seen = <String>{};
+    final out = <StreamingData>[];
+    for (final s in songs) {
+      if (s.videoId.isEmpty) continue;
+      if (seen.contains(s.videoId)) continue;
+      seen.add(s.videoId);
+      out.add(s);
+    }
+    return out;
+  }
+
+  List<String> getArtists() {
+    final songs = getAllSongs();
+    final set = <String>{};
+    for (final s in songs) {
+      final name = s.artist.trim();
+      if (name.isNotEmpty) set.add(name);
+    }
+    final list = set.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return list;
+  }
+
+  List<StreamingData> getSongsByArtist(String artist) {
+    final needle = artist.trim().toLowerCase();
+    return getAllSongs()
+        .where((s) => s.artist.toLowerCase() == needle)
+        .toList();
+  }
+
+  List<SavedAlbum> getAlbumsByArtist(String artist) {
+    final needle = artist.trim().toLowerCase();
+    return getAlbums().where((a) => a.artist.toLowerCase() == needle).toList();
+  }
+
+  List<StreamingData> getSongsByAlbumId(String albumId) {
+    final values = _albumsBox?.get(albumId);
+    if (values == null) return [];
+    try {
+      final album =
+          SavedAlbum.fromJson(jsonDecode(values) as Map<String, dynamic>);
+      return album.tracks;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  List<String> getGenres() {
+    // Genre metadata isn't available in current storage; return empty list.
+    return <String>[];
+  }
+
   void _enforceBoundsAndMaybeCompact() {
     if (_recentPlaysBox != null) {
       while (_recentPlaysBox!.length > _maxRecents) {

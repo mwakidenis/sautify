@@ -6,6 +6,7 @@ https://creativecommons.org/licenses/by/4.0/
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsService extends ChangeNotifier {
@@ -44,6 +45,7 @@ class SettingsService extends ChangeNotifier {
   static const _kBassBoostStrength = 'bass_boost_strength';
   static const _kSkipSilenceEnabled = 'skip_silence_enabled';
   static const _kDynamicThemeEnabled = 'dynamic_theme_enabled';
+  static const _kStreamingResolverPreference = 'streaming_resolver_preference';
 
   // Defaults
   bool duckOnInterruption = true;
@@ -73,6 +75,8 @@ class SettingsService extends ChangeNotifier {
   int bassBoostStrength = 0;
   bool skipSilenceEnabled = false;
   bool dynamicThemeEnabled = false;
+  StreamingResolverPreference streamingResolverPreference =
+      StreamingResolverPreference.defaultMode;
 
   bool get isReady => _ready;
 
@@ -109,13 +113,18 @@ class SettingsService extends ChangeNotifier {
         _prefs.getBool(_kLoudnessEnhancerEnabled) ?? loudnessEnhancerEnabled;
     loudnessEnhancerTargetGain =
         _prefs.getDouble(_kLoudnessEnhancerTargetGain) ??
-        loudnessEnhancerTargetGain;
+            loudnessEnhancerTargetGain;
     bassBoostEnabled = _prefs.getBool(_kBassBoostEnabled) ?? bassBoostEnabled;
     bassBoostStrength = _prefs.getInt(_kBassBoostStrength) ?? bassBoostStrength;
     skipSilenceEnabled =
         _prefs.getBool(_kSkipSilenceEnabled) ?? skipSilenceEnabled;
     dynamicThemeEnabled =
         _prefs.getBool(_kDynamicThemeEnabled) ?? dynamicThemeEnabled;
+
+    streamingResolverPreference =
+        StreamingResolverPreferencePrefs.fromPrefValue(
+      _prefs.getString(_kStreamingResolverPreference),
+    );
     final loadedBands = _prefs.getString(_kEqualizerBands);
     if (loadedBands != null) {
       try {
@@ -137,6 +146,29 @@ class SettingsService extends ChangeNotifier {
       }
     }
     _ready = true;
+    notifyListeners();
+  }
+
+  Future<void> setStreamingResolverPreference(
+    StreamingResolverPreference value,
+  ) async {
+    streamingResolverPreference = value;
+    // Safety: this setter can be called from UI even before init().
+    // Ensure SharedPreferences is ready to avoid LateInitializationError.
+    if (!_ready) {
+      try {
+        await init();
+      } catch (_) {
+        // If init fails, we still keep the in-memory value but avoid crashing.
+        notifyListeners();
+        return;
+      }
+    }
+    try {
+      await _prefs.setString(_kStreamingResolverPreference, value.prefValue);
+    } catch (_) {
+      // Best-effort persistence.
+    }
     notifyListeners();
   }
 
@@ -244,9 +276,8 @@ class SettingsService extends ChangeNotifier {
   Future<void> setEqualizerBand(int index, double gain) async {
     equalizerBands[index] = gain;
     // Serialize map to string "index:gain,index:gain"
-    final String serialized = equalizerBands.entries
-        .map((e) => '${e.key}:${e.value}')
-        .join(',');
+    final String serialized =
+        equalizerBands.entries.map((e) => '${e.key}:${e.value}').join(',');
     await _prefs.setString(_kEqualizerBands, serialized);
     notifyListeners();
   }

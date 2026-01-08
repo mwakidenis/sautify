@@ -19,6 +19,7 @@ import 'package:sautifyv2/db/metadata_overrides_store.dart';
 import 'package:sautifyv2/fetch_music_data.dart';
 import 'package:sautifyv2/models/loading_progress_model.dart';
 import 'package:sautifyv2/models/streaming_model.dart';
+import 'package:sautifyv2/models/streaming_resolver_preference.dart';
 import 'package:sautifyv2/models/track_info.dart';
 import 'package:sautifyv2/services/dio_client.dart';
 import 'package:sautifyv2/services/image_cache_service.dart';
@@ -222,7 +223,8 @@ class AudioPlayerService extends ChangeNotifier {
         'cmd': 'buildAndResolve',
         'tracks': tracks,
         'requestId': localReqId,
-        'quality': 'medium', // TODO: wire through user quality preference
+        'quality': SettingsService().preferredQuality,
+        'resolverPref': SettingsService().streamingResolverPreference.prefValue,
       });
       final res = await completer.future.timeout(const Duration(seconds: 3));
       // Ignore if main load superseded meanwhile
@@ -662,9 +664,6 @@ class AudioPlayerService extends ChangeNotifier {
     final session = await AudioSession.instance;
     await session.configure(AudioSessionConfiguration.music());
 
-    // Crossfade: current just_audio version without advanced feature flag lacks runtime API here.
-    // Placeholder: when upgrading to version that exposes crossfade APIs, apply settings.crossfadeSeconds.
-
     // Apply default speed, shuffle, loop
     try {
       await _player.setSpeed(settings.defaultPlaybackSpeed);
@@ -1024,6 +1023,7 @@ class AudioPlayerService extends ChangeNotifier {
         firstTrackFuture = _streamingService.fetchStreamingData(
           t.videoId,
           _getPreferredQuality(),
+          preference: SettingsService().streamingResolverPreference,
         );
       }
     }
@@ -1125,6 +1125,7 @@ class AudioPlayerService extends ChangeNotifier {
           final r = await _streamingService.fetchStreamingData(
             existing.videoId,
             quality,
+            preference: SettingsService().streamingResolverPreference,
           );
           if (r != null) {
             _playlist[idx] = existing.copyWith(
@@ -1324,6 +1325,9 @@ class AudioPlayerService extends ChangeNotifier {
     }
 
     if (!pruned) notifyListeners();
+    if (!pruned) {
+      unawaited(LibraryStore.saveQueue(_playlist));
+    }
   }
 
   /// Dedicated pipeline for offline playback.
@@ -1425,6 +1429,7 @@ class AudioPlayerService extends ChangeNotifier {
         final r = await _streamingService.fetchStreamingData(
           _playlist[idx].videoId,
           quality,
+          preference: SettingsService().streamingResolverPreference,
         );
         if (r != null) {
           final old = _playlist[idx];
@@ -1544,6 +1549,7 @@ class AudioPlayerService extends ChangeNotifier {
     }
 
     notifyListeners();
+    unawaited(LibraryStore.saveQueue(_playlist));
   }
 
   /// Remove track at index
@@ -1561,6 +1567,7 @@ class AudioPlayerService extends ChangeNotifier {
       }
 
       notifyListeners();
+      unawaited(LibraryStore.saveQueue(_playlist));
     }
   }
 
@@ -1573,6 +1580,7 @@ class AudioPlayerService extends ChangeNotifier {
       // Rebuild to maintain correct order in player source
       await _rebuildAudioSource(preferPlaylistIndex: _currentIndex);
       notifyListeners();
+      unawaited(LibraryStore.saveQueue(_playlist));
     }
   }
 
@@ -1994,6 +2002,7 @@ class AudioPlayerService extends ChangeNotifier {
       final result = await _streamingService.fetchStreamingData(
         track.videoId,
         _getPreferredQuality(),
+        preference: SettingsService().streamingResolverPreference,
       );
 
       if (result != null && result.isReady) {
@@ -2512,6 +2521,7 @@ class AudioPlayerService extends ChangeNotifier {
           final r = await _streamingService.fetchStreamingData(
             existing.videoId,
             _getPreferredQuality(),
+            preference: SettingsService().streamingResolverPreference,
           );
           if (r != null && next < _playlist.length) {
             _playlist[next] = existing.copyWith(
@@ -2785,7 +2795,8 @@ class AudioPlayerService extends ChangeNotifier {
         'progressive': true,
         'tracks': tracks,
         'requestId': localReqId,
-        'quality': 'medium',
+        'quality': SettingsService().preferredQuality,
+        'resolverPref': SettingsService().streamingResolverPreference.prefValue,
         'priorityIndex': _currentIndex,
         'batchSize': initialFastMode ? 3 : 6,
         'concurrency': 4,
