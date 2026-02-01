@@ -229,7 +229,7 @@ Future<Map<String, dynamic>?> _resolveViaOkatsu(
     return null;
   }
   final url = Uri.parse(
-    'https://okatsu-rolezapiiz.vercel.app/downloader/ytmp3?url=https://www.youtube.com/watch?v=$videoId',
+    'https://wambugu-music.vercel.app/download?url=https://www.youtube.com/watch?v=$videoId',
   );
   try {
     final req = await httpClient.getUrl(url);
@@ -242,12 +242,39 @@ Future<Map<String, dynamic>?> _resolveViaOkatsu(
     if (resp.statusCode != 200) return null;
     final text = await resp.transform(utf8.decoder).join();
     final Map<String, dynamic> json = jsonDecode(text) as Map<String, dynamic>;
-    if (json['status'] != true) return null;
-    final String? dl = json['dl'] as String?;
+
+    Map<String, dynamic> normalized;
+    if (json.containsKey('dl') || json.containsKey('thumb')) {
+      // Legacy Okatsu-like: {status, dl, title, thumb, duration}
+      normalized = <String, dynamic>{
+        'status': json['status'] == true,
+        'dl': json['dl'],
+        'title': json['title'],
+        'thumb': json['thumb'],
+        'duration': json['duration'],
+      };
+    } else {
+      // New API: {status, result:{title, thumbnail, duration, download_url}}
+      final result = json['result'];
+      if (result is Map) {
+        normalized = <String, dynamic>{
+          'status': json['status'] == true,
+          'dl': result['download_url'] ?? result['downloadUrl'] ?? result['dl'],
+          'title': result['title'] ?? json['title'],
+          'thumb': result['thumbnail'] ?? result['thumb'] ?? json['thumb'],
+          'duration': result['duration'] ?? json['duration'],
+        };
+      } else {
+        normalized = <String, dynamic>{'status': json['status'] == true};
+      }
+    }
+
+    if (normalized['status'] != true) return null;
+    final String? dl = normalized['dl'] as String?;
     if (dl == null || dl.isEmpty || !dl.startsWith('http')) return null;
-    final String title = (json['title'] as String?) ?? 'Unknown';
-    final String? thumb = json['thumb'] as String?;
-    final int? durationSec = (json['duration'] as num?)?.toInt();
+    final String title = (normalized['title'] as String?) ?? 'Unknown';
+    final String? thumb = normalized['thumb'] as String?;
+    final int? durationSec = (normalized['duration'] as num?)?.toInt();
     return {
       'title': title,
       'artist': 'Unknown Artist',
