@@ -1,4 +1,4 @@
-# Sautify
+<img width="1534" height="510" alt="Screenshot 2026-02-02 155625" src="https://github.com/user-attachments/assets/75b244e3-846c-47dc-b304-0b0971cabd21" />
 
 Stream smarter. Listen free
 
