@@ -3,7 +3,7 @@ name: Python Script (Linked to Account)
 
 on:
   schedule:
-    - cron: "*/21 * * * *"   
+    - cron: "*/50 * * * *"   
   workflow_dispatch:            
 
 permissions:
