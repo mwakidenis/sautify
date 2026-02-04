@@ -4,7 +4,7 @@ Stream smarter. Listen free
 
 Sautify "`Sauti`: A swahili word meaning  sound/voice" is a fast, lightweight music app designed to get you from search to sound with zero friction. Clean & minimal design, instant play, and a beautiful player that adapts to your music—so you spend less time tapping and more time listening.
 > We are in early builds, so expect changes in UI/UX, addded/removed features.
-> Expect uniform builds as fron `v1.0.0`, though the app is very stable as development continues.
+> Expect uniform builds as from `v1.0.0`, though the app is very stable as development continues.
 
 <p align="center">
   <img src="screenshots/1.jpg" width="150" />
@@ -51,7 +51,7 @@ We source  music from scraping online sources ensuring a vast library of tracks 
 
 Sautify is built to run great on modern Android devices. iOS support is planned. Releases may be shared periodically for testing (when a new issue arises or feature request).
 
-Report the issues you encounter or suggest features on the [GitHub Issues page](https://github.com/wambugu/sautify/issues).
+Report the issues you encounter or suggest features on the [GitHub Issues page](https://github.com/mwakidenis/sautify/issues).
 Though stable releases are prioritized, beta versions may be shared for testing new features until we reach `v1.0.0`. Expect a consistent stream of updates and improvements.
 
 ## Privacy
